@@ -5,7 +5,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <title>WebKit Autoloader Installer v[[VERSION_PLACEHOLDER]] by PLK (built [[BUILD_TIME_PLACEHOLDER]])</title>
+  <title>WebKit Autoloader Installer</title>
   <style>
     * {
       margin: 0;
@@ -21,8 +21,8 @@
 
     body {
       font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
-      background: #0f172a;
-      background: -webkit-linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
+      background: #070b14;
+      background: linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
       color: #e2e8f0;
       display: -webkit-box;
       display: -webkit-flex;
@@ -35,19 +35,6 @@
       justify-content: center;
       min-height: 100%;
       text-align: center;
-    }
-
-    #footer {
-      position: fixed;
-      bottom: 12px;
-      left: 50%;
-      -webkit-transform: translateX(-50%);
-      transform: translateX(-50%);
-      font-size: 0.75rem;
-      color: #4b5563;
-      line-height: 1.5;
-      text-align: center;
-      z-index: 20;
     }
 
 
@@ -88,11 +75,12 @@
       position: relative;
       width: 100%;
       max-width: 30rem;
-      height: 1.25rem;
-      margin: 1.75rem auto 0;
-      background: #1b2436;
-      border: 1px solid #2c3e5a;
-      border-radius: 8px;
+      height: 4.5rem;
+      margin: 2rem auto 0;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(56, 189, 248, 0.15);
+      border-radius: 999px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
       overflow: hidden;
     }
 
@@ -102,14 +90,35 @@
       left: 0;
       height: 100%;
       width: 100%;
-      background: #38bdf8;
-      background: -webkit-linear-gradient(90deg, #2563eb 0%, #38bdf8 100%);
+      background: linear-gradient(90deg, #1d4ed8 0%, #2563eb 40%, #38bdf8 100%);
       -webkit-transform: scaleX(0);
       transform: scaleX(0);
       -webkit-transform-origin: left center;
       transform-origin: left center;
       -webkit-transition: -webkit-transform 0.3s ease-out;
       transition: transform 0.3s ease-out;
+    }
+
+    #progressBar::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -60%;
+      width: 50%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+      -webkit-animation: shimmer 2s infinite;
+      animation: shimmer 2s infinite;
+    }
+
+    @-webkit-keyframes shimmer {
+      0% { left: -60%; }
+      100% { left: 120%; }
+    }
+
+    @keyframes shimmer {
+      0% { left: -60%; }
+      100% { left: 120%; }
     }
 
     #progressPct {
@@ -127,10 +136,10 @@
       -webkit-box-pack: center;
       -webkit-justify-content: center;
       justify-content: center;
-      color: #fff;
-      font-size: 0.8rem;
-      font-weight: 600;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+      color: #f1f5f9;
+      font-size: 1rem;
+      letter-spacing: 0.02em;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
       z-index: 1;
       pointer-events: none;
     }
@@ -249,8 +258,6 @@
     <div id="logContainer" hidden></div>
 
   </main>
-
-  <footer id="footer">WebKit Autoloader Installer v[[VERSION_PLACEHOLDER]] by PLK (built [[BUILD_TIME_PLACEHOLDER]])<br />This project is free and open source: github.com/itsPLK/ps5-webkit-autoloader</footer>
 
   <script>
     (function () {

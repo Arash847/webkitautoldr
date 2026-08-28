@@ -75,16 +75,7 @@
   var exploitMode = null;
 
   function uiLog(message, type) {
-    type = type || 'info';
-    var entry = document.createElement('div');
-    entry.className = 'line ' + type;
-    entry.textContent = message;
-    logContainer.appendChild(entry);
-    while (logContainer.childElementCount > MAX_LOG_LINES) {
-      logContainer.removeChild(logContainer.firstChild);
-    }
-    logContainer.parentNode.scrollTop = logContainer.parentNode.scrollHeight;
-    return entry;
+    return null;
   }
 
   function updateProgress(percent, message) {
