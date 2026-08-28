@@ -17,7 +17,25 @@ export NM=prospero-nm
 export RANLIB=prospero-ranlib
 
 echo "=== Building libmicrohttpd 1.0.1 ==="
-wget -O libmicrohttpd.tar.gz https://ftp.gnu.org/gnu/libmicrohttpd/libmicrohttpd-1.0.1.tar.gz
+# Try multiple mirrors with retries (GNU FTP can be unreliable in CI)
+MIRRORS=(
+  "https://mirrors.kernel.org/gnu/libmicrohttpd/libmicrohttpd-1.0.1.tar.gz"
+  "https://mirror.math.princeton.edu/pub/gnu/libmicrohttpd/libmicrohttpd-1.0.1.tar.gz"
+  "https://ftp.gnu.org/gnu/libmicrohttpd/libmicrohttpd-1.0.1.tar.gz"
+)
+DOWNLOADED=0
+for mirror in "${MIRRORS[@]}"; do
+  echo "Trying $mirror ..."
+  if wget --tries=3 --timeout=15 -O libmicrohttpd.tar.gz "$mirror"; then
+    DOWNLOADED=1
+    break
+  fi
+  echo "Failed, trying next mirror..."
+done
+if [ "$DOWNLOADED" -ne 1 ]; then
+  echo "Error: Could not download libmicrohttpd from any mirror."
+  exit 1
+fi
 tar xf libmicrohttpd.tar.gz
 cd libmicrohttpd-1.0.1
 ./configure --host=x86_64-pc-freebsd12 \
