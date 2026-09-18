@@ -1,5 +1,5 @@
 diff --git a/slopkit/p2jb.html b/slopkit/p2jb.html
-index 9e584d5e02a21bf0144eaaeef7873409cb092745..c0bbbc86b5ff00af623d7791bbe0340d78f5fd88 100644
+index 9e584d5..c0bbbc8 100644
 --- a/slopkit/p2jb.html
 +++ b/slopkit/p2jb.html
 @@ -414,6 +414,7 @@ const LOG_DEBUG = Q.get("log") === "debug";
@@ -157,7 +157,7 @@ index 9e584d5e02a21bf0144eaaeef7873409cb092745..c0bbbc86b5ff00af623d7791bbe0340d
              return;
          }
 diff --git a/slopkit/poops.html b/slopkit/poops.html
-index ed482cc8c8fe3026bfbff1fbccad9ef3f39e1ccf..a6d702ee1120b4238a247e59e56d11a4c4190fa1 100644
+index bbb2f2e..7c09822 100644
 --- a/slopkit/poops.html
 +++ b/slopkit/poops.html
 @@ -501,6 +501,7 @@ const DEFAULT_ATTEMPTS = TRIGGER === "overflow" ? 96
@@ -176,39 +176,25 @@ index ed482cc8c8fe3026bfbff1fbccad9ef3f39e1ccf..a6d702ee1120b4238a247e59e56d11a4
          count++;
          if (!Object.prototype.hasOwnProperty.call(expected, key)
              || expected[key] !== value) exact = false;
-@@ -942,8 +944,10 @@ const PAYLOADS = Object.freeze([
-         name: "kstuff.elf", info: "kstuff.elf - EchoStretch" },
+@@ -943,7 +945,9 @@ const PAYLOADS = Object.freeze([
      { title: "PLK Manager", description: "Payload management tools.",
          name: "PLK.elf", info: "PLK.elf - PLK" },
--    { title: "ShadowMountPlus", description: "Mount and manage game images.",
+     { title: "ShadowMountPlus", description: "Mount and manage game images.",
 -        name: "shadowmountplus.elf", info: "shadowmountplus.elf - Drakmor" }
-+    { title: "ShadowMountPlus", description: "Mount and manage game images.",
 +        name: "shadowmountplus.elf", info: "shadowmountplus.elf - Drakmor" },
 +    { title: "WKAL autoload", description: "", name: "payload.elf",
 +        info: "payload.elf", hidden: true }
  ]);
  
  function populatePayloadButtons() {
-@@ -973,12 +977,13 @@ function populatePayloadButtons() {
-         info.setAttribute("data-ready", payload.info);
-         info.textContent = payload.info.replace(" - ", " · ");
- 
--        button.appendChild(title);
--        button.appendChild(description);
--        button.appendChild(info);
--        button.addEventListener("click", function (event) {
--            if (event && event.preventDefault) event.preventDefault();
--            sendPayloadInPlace(payload.name, button);
-+        button.appendChild(title);
-+        button.appendChild(description);
-+        button.appendChild(info);
+@@ -976,6 +980,7 @@ function populatePayloadButtons() {
+         button.appendChild(title);
+         button.appendChild(description);
+         button.appendChild(info);
 +        if (payload.hidden) button.style.display = "none";
-+        button.addEventListener("click", function (event) {
-+            if (event && event.preventDefault) event.preventDefault();
-+            sendPayloadInPlace(payload.name, button);
-         });
-         grid.appendChild(button);
-     }
+         button.addEventListener("click", function (event) {
+             if (event && event.preventDefault) event.preventDefault();
+             sendPayloadInPlace(payload.name, button);
 @@ -1178,7 +1183,7 @@ function preparePayloadSender() {
      }
  }
@@ -291,25 +277,13 @@ index ed482cc8c8fe3026bfbff1fbccad9ef3f39e1ccf..a6d702ee1120b4238a247e59e56d11a4
  async function runLadder() {
      const X = ctx;
      LADDER = buildLadder(X, engine);
-@@ -2125,12 +2187,13 @@ async function runLadder() {
-         stage("selected stages complete, nothing triggered, everything put back -- "
-             + passed + " PASS", "ok");
- 
--    if (payloadSuccess) {
--        flushMark("ELFLDR-MENU-INPAGE",
--            "no-navigation-parked-racers-and-fds-remain-owned-port=9021");
--        if (!payloadMenuEl.classList.contains("on")) showPayloadMenu();
--    }
--}
-+    if (payloadSuccess) {
-+        flushMark("ELFLDR-MENU-INPAGE",
-+            "no-navigation-parked-racers-and-fds-remain-owned-port=9021");
-+        if (!payloadMenuEl.classList.contains("on")) showPayloadMenu();
+@@ -2129,6 +2191,7 @@ async function runLadder() {
+         flushMark("ELFLDR-MENU-INPAGE",
+             "no-navigation-parked-racers-and-fds-remain-owned-port=9021");
+         if (!payloadMenuEl.classList.contains("on")) showPayloadMenu();
 +        startAutoload();
-+    }
-+}
- 
- let bootChainReady = false;
+     }
+ }
  
 @@ -2575,6 +2638,7 @@ function lastRunText() {
          await refreshConsoleNetworkInfo();
@@ -320,10 +294,49 @@ index ed482cc8c8fe3026bfbff1fbccad9ef3f39e1ccf..a6d702ee1120b4238a247e59e56d11a4
              return;
          }
 diff --git a/slopkit/poops.js b/slopkit/poops.js
-index 3c979df0043719ca5a351a93708286f1bd611326..a3d3b0d23b6a9f6c3c0d78ca4ee8af18ad0e453a 100644
+index 3c979df..2f6b743 100644
 --- a/slopkit/poops.js
 +++ b/slopkit/poops.js
-@@ -7824,9 +7824,9 @@ export function makePoopsEngine(X) {
+@@ -6293,6 +6293,38 @@ export function makePoopsEngine(X) {
+           "-fds=" + parkedFds.length +
+           "-action=reboot",
+       );
++
++      // KP FIX: terminate racer threads when stage 3 has certified alias repair.
++      // After a successful stage 3 + stage 4 + stage 5, the rthdr pointers are
++      // zeroed (aliasesRepaired=true) and elfldr is running - we no longer need
++      // the iov/uio kernel R/W primitive. The racer threads parked in blocking
++      // kernel calls are the primary source of post-exploit kernel panics:
++      // background PS5 daemons (network stack, syslogd) interact with the socket
++      // and pipe structures these threads hold, triggering KP after a few minutes.
++      // Terminating them here removes the dirty state from the kernel without
++      // touching the FDs (which stay parked as before).
++      if (S.aliasesRepaired) {
++        flushMark("POOPS-CLEANUP-RACERS-PRE", "aliasesRepaired=1-terminating-iov-uio-groups");
++        for (const g of [S.iovGroup, S.uioReadGroup, S.uioWriteGroup]) {
++          if (!g || !g.spawned || !g.spawned.length) continue;
++          try {
++            const ub = await unblockGroup(g);
++            forceSettled(g, "post-jailbreak");
++            const tr = await H.terminate(g, "post-jailbreak");
++            const detail = tr.already
++              ? "already terminated"
++              : "exited in " + tr.exitedMs + "ms";
++            rep.groups.push(g.name + ": post-jailbreak terminate -- " +
++              detail + ", unblock rounds=" + ub.rounds);
++          } catch (err) {
++            rep.groups.push(g.name + ": post-jailbreak terminate failed -- " +
++              String((err && err.message) || err).slice(0, 120));
++          }
++        }
++        S.groupsStillLive = [];
++        flushMark("POOPS-CLEANUP-RACERS-DONE", "iov-uio-groups-terminated");
++      }
++
+       return rep;
+     }
+ 
+@@ -7824,9 +7856,9 @@ export function makePoopsEngine(X) {
      flushMark("STAGE5-FETCH-BIN-OK", "bytes=" + binBytes.length);
  
      try {
