@@ -37,6 +37,9 @@ atomic_int install_completed = 0;
  * visible to the main loop. */
 atomic_int webkit_data_cleared = 0;
 
+/* Active exploit chosen for this installation session ("poops", "relapse", or "umtx2"). */
+static char active_exploit[16] = {0};
+
 static void add_cors_headers(struct MHD_Response *resp) {
     MHD_add_response_header(resp, "Access-Control-Allow-Origin", CORS_ORIGIN);
 }
@@ -57,11 +60,34 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
     (void)upload_data;
     (void)upload_data_size;
     float fw = 0.0f;
+    char fw_str[16] = {0};
     const char *ua = MHD_lookup_connection_value(conn, MHD_HEADER_KIND, "User-Agent");
     if (ua) {
         const char *ps5 = strstr(ua, "PlayStation 5/");
-        if (ps5) fw = strtof(ps5 + 14, NULL);
+        if (ps5) {
+            size_t i = 0;
+            const char *p = ps5 + 14;
+            while ((p[i] >= '0' && p[i] <= '9') || p[i] == '.') {
+                if (i < sizeof(fw_str) - 1) fw_str[i] = p[i];
+                i++;
+            }
+            fw_str[i < sizeof(fw_str) ? i : sizeof(fw_str) - 1] = '\0';
+            fw = strtof(fw_str, NULL);
+        }
     }
+    const char *fw_arg = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "fw");
+    if (fw == 0.0f && fw_arg) {
+        strncpy(fw_str, fw_arg, sizeof(fw_str) - 1);
+        fw = strtof(fw_arg, NULL);
+    }
+    const char *exploit_arg = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "exploit");
+    if (exploit_arg && (strcmp(exploit_arg, "poops") == 0 ||
+                        strcmp(exploit_arg, "relapse") == 0 ||
+                        strcmp(exploit_arg, "umtx2") == 0)) {
+        strncpy(active_exploit, exploit_arg, sizeof(active_exploit) - 1);
+        active_exploit[sizeof(active_exploit) - 1] = '\0';
+    }
+
 
     /* Handle CORS Preflight (OPTIONS) */
     if (strcmp(method, "OPTIONS") == 0) {
@@ -148,6 +174,7 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
     } else if (strcmp(url, ROUTE_CLEAR_WEBKIT_DATA) == 0) {
         int err = wkali_clear_webkit_data();
         if (err == 0) {
+            active_exploit[0] = '\0';
             wkali_log("[WKALI] WebKit data cleared successfully. Will re-launch browser.\n");
             simulate_on_clear_success();
             resp = MHD_create_response_from_buffer(2, (void *)"OK",
@@ -163,6 +190,15 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
             MHD_add_response_header(resp, "Content-Type", "text/plain");
             http_status = MHD_HTTP_INTERNAL_SERVER_ERROR;
         }
+    } else if (strcmp(url, "/selected_exploit") == 0 ||
+               (strlen(url) >= 17 && strcmp(url + strlen(url) - 17, "/selected_exploit") == 0)) {
+        const char *sel = exploit_arg ? exploit_arg :
+                          (active_exploit[0] ? active_exploit :
+                          (fw > 0.0f && fw <= 5.50f ? "umtx2" : "relapse"));
+        resp = MHD_create_response_from_buffer(strlen(sel), (void *)sel,
+                                               MHD_RESPMEM_PERSISTENT);
+        MHD_add_response_header(resp, "Content-Type", "text/plain");
+        http_status = MHD_HTTP_OK;
     } else {
         const FileEntry *entry = registry_lookup(url);
         if (entry) {
@@ -177,7 +213,7 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
             if (entry->compressed) {
                 /* Inflate the raw-DEFLATE blob (src/inflate.c, vendored puff)
                  * into a fresh heap buffer; MHD frees it with MUST_FREE. */
-                decompressed = malloc(entry->orig_size);
+                decompressed = malloc(entry->orig_size + 1);
                 if (!decompressed) {
                     const char *oom = "503 Out of Memory\n";
                     resp = MHD_create_response_from_buffer(strlen(oom),
@@ -206,28 +242,59 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
                     MHD_destroy_response(resp);
                     return ret;
                 }
+                decompressed[destlen] = '\0';
                 payload = decompressed;
                 payload_size = destlen;
                 mem_mode = MHD_RESPMEM_MUST_FREE;
             }
 
-            /* Dynamically strip the exploit this console cannot use from the
-               cache manifest, so the browser only downloads (and caches) the
-               chain it will actually run. */
-            if (strcmp(url, ROUTE_CACHE_MANIFEST) == 0 && (fw > 0.0f || strcmp(WKALI_FORCE_EXPLOIT, "auto") != 0)) {
-                const char *exploit_dir;
-                int use_umtx2;
+            /* When on firmware supported by both Poops and Relapse (7.00 - 12.00),
+               the installer page must ask the user which exploit to install BEFORE
+               proceeding with caching. If no exploit has been chosen yet, strip
+               manifest="..." from index.html so WebKit does NOT start caching.
+               Note: 9.05 and 11.40 are supported ONLY by Poops (not Relapse). */
+            int is_poops_only = (strcmp(fw_str, "9.05") == 0 || strcmp(fw_str, "11.40") == 0);
+            int is_dual_fw = (!is_poops_only && fw >= 7.00f && fw <= 12.00f) ||
+                             (fw == 0.0f && strcmp(WKALI_FORCE_EXPLOIT, "auto") == 0);
+            int prompt_user = (strcmp(WKALI_FORCE_EXPLOIT, "auto") == 0) && is_dual_fw &&
+                              (exploit_arg == NULL) && (active_exploit[0] == '\0');
 
-                if (strcmp(WKALI_FORCE_EXPLOIT, "auto") == 0) {
-                    use_umtx2 = (fw <= 5.50f);
-                    wkali_log("[WKALI] Detected firmware %.2f, caching %s exploit\n",
-                              fw, use_umtx2 ? "umtx2" : "relapse");
-                } else {
-                    use_umtx2 = (strcmp(WKALI_FORCE_EXPLOIT, "umtx2") == 0);
-                    wkali_log("[WKALI] FORCE_EXPLOIT is set, caching %s exploit\n",
-                              use_umtx2 ? "umtx2" : "relapse");
+            if ((strcmp(url, ROUTE_INDEX) == 0 || strcmp(url, ROUTE_INDEX_HTML) == 0) && prompt_user) {
+                char *copy = malloc(payload_size + 1);
+                if (copy) {
+                    memcpy(copy, payload, payload_size);
+                    copy[payload_size] = '\0';
+                    if (mem_mode == MHD_RESPMEM_MUST_FREE) {
+                        free(payload);
+                    }
+                    payload = copy;
+                    mem_mode = MHD_RESPMEM_MUST_FREE;
+
+                    char *manifest_attr = strstr((char *)payload, " manifest=\"/cache.appcache\"");
+                    if (manifest_attr) {
+                        memset(manifest_attr, ' ', strlen(" manifest=\"/cache.appcache\""));
+                    }
                 }
-                exploit_dir = use_umtx2 ? "/relapse/" : "/umtx2/";
+            }
+
+            /* Dynamically strip incompatible exploit files from the cache manifest */
+            if (strcmp(url, ROUTE_CACHE_MANIFEST) == 0) {
+                const char *chosen = NULL;
+                if (strcmp(WKALI_FORCE_EXPLOIT, "auto") != 0) {
+                    chosen = WKALI_FORCE_EXPLOIT;
+                } else if (exploit_arg) {
+                    chosen = exploit_arg;
+                } else if (active_exploit[0] != '\0') {
+                    chosen = active_exploit;
+                } else if (fw > 0.0f && fw <= 5.50f) {
+                    chosen = "umtx2";
+                } else if (fw > 12.00f) {
+                    chosen = "relapse";
+                } else {
+                    chosen = "relapse";
+                }
+
+                wkali_log("[WKALI] AppCache manifest: caching %s exploit\n", chosen);
 
                 char *filtered = malloc(payload_size + 1);
                 if (filtered) {
@@ -244,7 +311,16 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
                         memcpy(line, src, copy_len);
                         line[copy_len] = '\0';
 
-                        if (!strstr(line, exploit_dir)) {
+                        int keep = 1;
+                        if (strcmp(chosen, "umtx2") == 0) {
+                            if (strstr(line, "/slopkit/") || strstr(line, "/relapse/")) keep = 0;
+                        } else if (strcmp(chosen, "poops") == 0) {
+                            if (strstr(line, "/umtx2/") || strstr(line, "/relapse/")) keep = 0;
+                        } else if (strcmp(chosen, "relapse") == 0) {
+                            if (strstr(line, "/umtx2/") || strstr(line, "/slopkit/")) keep = 0;
+                        }
+
+                        if (keep) {
                             memcpy(dst, src, line_len);
                             dst += line_len;
                         }
@@ -259,6 +335,7 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
                     mem_mode = MHD_RESPMEM_MUST_FREE;
                 }
             }
+
 
             /* Test simulation hook (no-op unless compiled with SIMULATE=1|2) */
             simulate_corrupt_manifest(url, &payload, &payload_size, &mem_mode);

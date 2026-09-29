@@ -52,6 +52,11 @@ def repo_root():
 def include_in_zip(rel):
     if "/.git/" in rel or rel.endswith("/.git"):
         return False
+    if rel.startswith("slopkit/payloads/"):
+        name = os.path.basename(rel)
+        return name.startswith("kexp") and name.endswith(".bin")
+    if rel == "slopkit/readme.png":
+        return False
     if rel.endswith(".sha256"):
         return False
     return True
@@ -110,7 +115,7 @@ def build_zip(frontend_dir, overrides_dir, version, build_time, payload_path=Non
                 data = data.replace(BUILD_TIME_TOKEN, build_time.encode("utf-8"))
                 zf.writestr(rel, data)
             elif rel == "app.js":
-                # Build-time exploit override (auto | umtx2 | relapse),
+                # Build-time exploit override (auto | umtx2 | poops | relapse),
                 # from the FORCE_EXPLOIT env — same token as the ELF build.
                 with open(file_map[rel], "rb") as f:
                     data = f.read()
@@ -119,6 +124,11 @@ def build_zip(frontend_dir, overrides_dir, version, build_time, payload_path=Non
                 zf.writestr(rel, data)
             else:
                 zf.write(file_map[rel], arcname=rel)
+
+        mode = os.environ.get("FORCE_EXPLOIT", "relapse")
+        if mode == "auto":
+            mode = "relapse"
+        zf.writestr("selected_exploit", (mode + "\n").encode("utf-8"))
 
     return archive.getvalue(), file_map
 

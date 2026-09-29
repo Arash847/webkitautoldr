@@ -11,6 +11,8 @@ Usage: gen_file_registry.py <dist_dir> <header_out> <source_out>
 """
 
 import os
+import posixpath
+import re
 import sys
 import zlib
 
@@ -49,19 +51,21 @@ def detect_content_type(path):
     return CONTENT_TYPES.get(ext, "application/octet-stream")
 
 
-# The exploits' payload dirs are already pruned to exactly what the chains load
-# (relapse keeps only its kexp shellcode and boots the shared elfldr from
-# /app/<version>/shared/; umtx2 keeps only its own elfldr-ps5.elf and boots that
-# one, like stock umtx2), so nothing here needs per-exploit payload filtering.
-# The autoload payload always comes from /app/<version>/payloads/.
-# The copied relapse/umtx2 are throwaway git repos (tools/apply_*_patch.sh), so
-# .git must never be embedded. The payload digest sidecars (*.sha256) are
-# build-time bookkeeping and must never be served. /VERSION is the staging
-# version handoff (see Makefile) — build-time bookkeeping too.
+# The exploits' payload dirs are pruned to what the chains load (relapse keeps
+# only its kexp shellcode and boots the shared elfldr from /app/<version>/shared/;
+# slopkit keeps only its kexp and boots the shared elfldr too; umtx2 keeps its
+# own elfldr-ps5.elf). The autoload payload always comes from payloads/.
+# The copied repos are throwaways so .git must never be embedded.
+# The payload digest sidecars (*.sha256) and /VERSION are build-time bookkeeping.
 def include_in_registry(path):
     if "/.git/" in path or path.endswith("/.git"):
         return False
     if path == "/VERSION":
+        return False
+    if "/slopkit/payloads/" in path:
+        name = os.path.basename(path)
+        return name.startswith("kexp") and name.endswith(".bin")
+    if "/slopkit/readme.png" in path:
         return False
     if path.endswith(".sha256"):
         return False
@@ -73,10 +77,11 @@ BUILD_TIME_PLACEHOLDER = b"[[BUILD_TIME_PLACEHOLDER]]"
 EXPLOIT_MODE_PLACEHOLDER = b"[[EXPLOIT_MODE]]"
 APP_DIR_PLACEHOLDER = b"[[APP_DIR_PLACEHOLDER]]"
 
-# The build-time exploit override in app.js (auto | umtx2 | relapse).
+# The build-time exploit override in app.js (auto | umtx2 | poops | relapse).
 # Defaults to "auto" (firmware routing) unless FORCE_EXPLOIT is set.
 DEFAULT_EXPLOIT_MODE = "auto"
-EXPLOIT_MODES = ("auto", "umtx2", "relapse")
+EXPLOIT_MODES = ("auto", "umtx2", "poops", "relapse")
+
 
 
 def get_version_info_with_handoff(dist_dir):
@@ -150,6 +155,17 @@ def compress_entry(data):
     return comp, True
 
 
+# The autoloader iframe loads poops.html with this exact query string.
+def poops_iframe_url(app_dir):
+    return (
+        app_dir + "/slopkit/slopkit/poops.html"
+        "?go=1&auto=1&production=1&trigger=netcontrol&attempts=8"
+        "&only=ps0_preflight,ps1_prepare,ps3_stage0,ps4_validate"
+        ",ps5_stage1,ps6_stage2,ps8_stage3,ps9_stage4,ps10_stage5"
+        "&log=debug&payload=1&autoload=payload.elf&v=final"
+    )
+
+
 # The autoloader iframe loads relapse/index.html with this exact query string.
 # AppCache matches URLs exactly (query included), so the manifest must list the
 # full URL or the console serves a fallback document instead of the exploit
@@ -166,6 +182,39 @@ def relapse_iframe_url(app_dir):
 # Keep in sync with UMTX2_URL in frontend/autoloader/app.js.
 def umtx2_iframe_url(app_dir):
     return app_dir + "/umtx2/index.html?autoload=payload.elf&v=1"
+
+
+# slopkit references its own scripts with cache-busting query strings
+# (e.g. "./core.js?v=final", "main.js?v=final", "../offsets/9.00.js?v=final").
+# AppCache matches URLs exactly, so the manifest must list those query
+# variants too or the console falls back and the module imports fail.
+CACHEBUST_RE = re.compile(r'([A-Za-z0-9_./-]+\.(?:js|css|html|png|jpg|gif))\?v=[A-Za-z0-9]+')
+
+
+def collect_cachebust_urls(files):
+    """Scan staged HTML/JS for query-string script imports (slopkit's ?v=
+    cache-busters) and return their absolute URLs, resolved relative to the
+    referencing file. Offsets are loaded dynamically as ../offsets/<fw>.js?v=final
+    in main.js, so every offsets file gets the ?v=final variant as well."""
+    urls = set()
+    for path, full in files:
+        if not path.endswith((".html", ".js")):
+            continue
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as f:
+                data = f.read()
+        except OSError:
+            continue
+        base = posixpath.dirname(path)
+        for match in CACHEBUST_RE.finditer(data):
+            ref, query = match.group(1), match.group(0)[len(match.group(1)):]
+            resolved = posixpath.normpath(posixpath.join(base, ref))
+            if resolved.startswith("/") and "/slopkit/" in resolved:
+                urls.add(resolved + query)
+    for path, _ in files:
+        if "/slopkit/offsets/" in path and path.endswith(".js"):
+            urls.add(path + "?v=final")
+    return sorted(urls)
 
 
 def build_manifest(files, version, build_time, app_dir, pointer_path, marker_path):
@@ -187,8 +236,11 @@ def build_manifest(files, version, build_time, app_dir, pointer_path, marker_pat
     cache_entries = [path for path, _ in files if path not in (pointer_path, marker_path)]
     cache_entries.sort()
     lines += cache_entries
+    lines.append(poops_iframe_url(app_dir))
     lines.append(relapse_iframe_url(app_dir))
     lines.append(umtx2_iframe_url(app_dir))
+    lines += collect_cachebust_urls(files)
+    lines.append(app_dir + "/selected_exploit")
     lines.append(pointer_path)
     lines.append(marker_path)
     lines += [
@@ -197,6 +249,7 @@ def build_manifest(files, version, build_time, app_dir, pointer_path, marker_pat
         "/install",
         "/version",
         "/logs",
+
         "",
         "FALLBACK:",
         "/ /index.html",

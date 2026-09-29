@@ -1,13 +1,18 @@
 # PS5 WebKit Autoloader: Architecture
 
 A persistent entry point for PS5 payloads that runs a WebKit/kernel exploit chain
-and autoloads your payloads fully offline. Two exploit chains are bundled and
+and autoloads your payloads fully offline. Three exploit chains are bundled and
 selected by firmware:
 
-- **umtx2** (FW 1.00–5.50) — idlesauce umtx2 chain (`umtx2/`).
-- **relapse** (FW 7.00–13.60) — relapse chain (`relapse/`).
+- **umtx2** (FW 1.00–5.50) — idlesauce umtx2 chain (`umtx2/`). Fully offline.
+- **poops** (FW 7.00–12.00) — slopkit poops chain (`slopkit/slopkit/poops.html`). Fully offline.
+- **relapse** (FW 7.00–13.60) — relapse chain (`relapse/`). Requires an active network interface.
 
-Both converge on the same result: a `WKAL00001` homescreen app that runs the
+On firmwares supported by both chains (7.00–12.00), the installer page asks the user
+before caching which chain to install: Poops (for fully offline support) or Relapse
+(newer chain; requires active Wi-Fi/Ethernet network interface).
+
+All chains converge on the same result: a `WKAL00001` homescreen app that runs the
 exploit, boots elfldr, and autoloads your payload through it.
 
 ## Repository layout
@@ -20,17 +25,18 @@ exploit, boots elfldr, and autoloads your payload through it.
 | `pc-host/` | The PC host script (`host.py`) + overrides for the bootstrap flow |
 | `src/` | Native installer ELF (HTTP server, app installer, browser launcher) |
 | `include/` | Headers, incl. generated `wkali_version.h` and `file_registry.{h,c}` |
-| `patches/` | The relapse and umtx2 autoloader patch files |
+| `patches/` | The relapse, slopkit, and umtx2 autoloader patch files |
 | `tools/` | Build, version, icon, registry scripts, and dependency downloader |
 | `assets/` | Icon source and PS5 app metadata templates |
-| `third_party/` | `relapse`, `umtx2`, `ps5-elfldr` and `ps5-unified-autoloader` submodules (pinned) |
+| `third_party/` | `relapse`, `slopkit`, `umtx2`, `ps5-elfldr` and `ps5-unified-autoloader` submodules (pinned) |
 
 ## Two setup flows
 
 **Installer ELF (already jailbroken).** Send `webkit-autoloader-installer_v*.elf` to the console
 (elfldr or Payload Manager). It opens the browser once to cache the frontend via AppCache,
 creates the `WKAL00001` app only after that cache succeeds, then exits. From then on the app
-runs the chain offline from the cache.
+runs the chain offline from the cache. On FW 7.00–12.00, it prompts the user to pick Poops or
+Relapse before starting the cache.
 
 **PC host (not jailbroken).** Run `webkit-autoloader-host_v*.py` / `.exe` on a PC, point the
 console's DNS at it, and open the User's Guide. The host spoofs `manuals.playstation.net`
@@ -41,27 +47,26 @@ instead of the unified-autoloader — so this flow installs the homescreen app.
 
 - A splash screen, a log terminal and a progress bar. The exploit runs in a **hidden**
   same-origin iframe. On load, `app.js` picks the chain from the firmware in
-  the user-agent (`PlayStation 5/x.xx`): **umtx2** for 1.00–5.50 and **relapse**
-  for 7.00–13.60. The iframe element is `display: none`; its document still
-  runs the chain and sends log and completion messages to the parent.
-- A `FORCE_EXPLOIT` build-time override (`auto | umtx2 | relapse`; or a `?force=`
+  the user-agent (`PlayStation 5/x.xx`): **umtx2** for 1.00–5.50, the user's installed
+  choice (**poops** or **relapse**) for 7.00–12.00, and **relapse** for 12.02–13.60.
+  The iframe element is `display: none`; its document still runs the chain and sends
+  log and completion messages to the parent.
+- A `FORCE_EXPLOIT` build-time override (`auto | umtx2 | poops | relapse`; or a `?force=`
   query) bypasses the table so a specific chain can be exercised on any firmware; the
   exploit's own firmware guard still applies.
 - umtx2 auto-runs its chain via the `on_load_autorun` sessionStorage key (set by
-  `app.js` before arming); relapse auto-runs on load from its own `?autoload=` query.
+  `app.js` before arming); poops and relapse auto-run on load from their query parameters.
 - On `window.load` the iframe is armed; at script parse it is blanked to `about:blank` so a
   WebProcess-crash page restore never auto-runs the chain.
 - `app.js` mirrors each chain's console log and receives the `?autoload` result
-  via `postMessage`. The newest non-error line drives the progress label, while
-  Relapse milestones advance the progress bar and the autoload result sets its
-  final state. Relapse notifies the parent on each log write; polling remains as
-  a fallback.
+  via `postMessage`. Relapse milestones advance the progress bar, while Poops stages
+  advance progress correspondingly.
+- `payload.elf` is a virtual name: the PC host serves the installer ELF there, the homescreen app
+  serves the real unified-autoloader. All exploits autoload the same `payload.elf`. umtx2 (FW
+  1.00–5.50) boots its **own bundled elfldr** (`/app/<version>/umtx2/payloads/elfldr-ps5.elf`, kept
+  from the umtx2 submodule like stock umtx2); poops (7.00–12.00) and relapse (7.00–13.60) boot
+  the **shared elfldr** (`/app/<version>/shared/elfldr-ps5.elf`).
 
-`payload.elf` is a virtual name: the PC host serves the installer ELF there, the homescreen app
-serves the real unified-autoloader. All exploits autoload the same `payload.elf`. umtx2 (FW
-1.00–5.50) boots its **own bundled elfldr** (`/app/<version>/umtx2/payloads/elfldr-ps5.elf`, kept
-from the umtx2 submodule like stock umtx2); relapse (7.00–13.60) boots the **shared elfldr**
-(`/app/<version>/shared/elfldr-ps5.elf`).
 
 ## Native installer (`src/`)
 
