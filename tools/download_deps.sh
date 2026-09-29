@@ -5,7 +5,7 @@
 #   third_party/ps5-elfldr             -> frontend/autoloader/shared/elfldr-ps5.elf
 #   third_party/ps5-unified-autoloader -> frontend/autoloader/payloads/payload.elf
 #
-# The shared elfldr is used by the slopkit chain (7.00-12.00); umtx2
+# The shared elfldr is used by the relapse chain (7.00-13.60); umtx2
 # (1.00-5.50) boots its own elfldr from the umtx2 submodule, like stock umtx2.
 # The unified-autoloader payload is the "bundled" ELF embedded in the installer:
 # after install, the homescreen app runs the exploit chain and autoloads it from
@@ -33,7 +33,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Shared elfldr (same ELF across all exploit chains)
 ELFLDR_SUBMODULE="$ROOT/third_party/ps5-elfldr"
 ELFLDR_REPO="itsPLK/ps5-elfldr"
-ELFLDR_TAG="v0.24-148b71c"
+ELFLDR_TAG="v0.26-bb1e117"
 ELFLDR_DEST="$ROOT/frontend/autoloader/shared/elfldr-ps5.elf"
 
 # Bundled autoload payload

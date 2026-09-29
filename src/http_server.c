@@ -211,59 +211,48 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
                 mem_mode = MHD_RESPMEM_MUST_FREE;
             }
 
-            /* Dynamically strip incompatible exploit files from the cache manifest */
+            /* Dynamically strip the exploit this console cannot use from the
+               cache manifest, so the browser only downloads (and caches) the
+               chain it will actually run. */
             if (strcmp(url, ROUTE_CACHE_MANIFEST) == 0 && (fw > 0.0f || strcmp(WKALI_FORCE_EXPLOIT, "auto") != 0)) {
-                if (strcmp(WKALI_FORCE_EXPLOIT, "umtx2") == 0) {
-                    wkali_log("[WKALI] FORCE_EXPLOIT is set, caching umtx2 exploit\n");
-                } else if (strcmp(WKALI_FORCE_EXPLOIT, "poops") == 0) {
-                    wkali_log("[WKALI] FORCE_EXPLOIT is set, caching poops exploit\n");
-                } else if (strcmp(WKALI_FORCE_EXPLOIT, "p2jb") == 0) {
-                    wkali_log("[WKALI] FORCE_EXPLOIT is set, caching p2jb exploit\n");
+                const char *exploit_dir;
+                int use_umtx2;
+
+                if (strcmp(WKALI_FORCE_EXPLOIT, "auto") == 0) {
+                    use_umtx2 = (fw <= 5.50f);
+                    wkali_log("[WKALI] Detected firmware %.2f, caching %s exploit\n",
+                              fw, use_umtx2 ? "umtx2" : "relapse");
                 } else {
-                    if (fw <= 5.50f) {
-                        wkali_log("[WKALI] Detected firmware %.2f <= 5.50, caching umtx2 exploit\n", fw);
-                    } else if (fw <= 12.00f) {
-                        wkali_log("[WKALI] Detected firmware %.2f <= 12.00, caching poops exploit\n", fw);
-                    } else {
-                        wkali_log("[WKALI] Detected firmware %.2f > 12.00, caching p2jb exploit\n", fw);
-                    }
+                    use_umtx2 = (strcmp(WKALI_FORCE_EXPLOIT, "umtx2") == 0);
+                    wkali_log("[WKALI] FORCE_EXPLOIT is set, caching %s exploit\n",
+                              use_umtx2 ? "umtx2" : "relapse");
                 }
+                exploit_dir = use_umtx2 ? "/relapse/" : "/umtx2/";
 
                 char *filtered = malloc(payload_size + 1);
                 if (filtered) {
                     char *src = (char *)payload;
                     char *dst = filtered;
                     size_t remaining = payload_size;
-                    
+
                     while (remaining > 0) {
                         char *nl = memchr(src, '\n', remaining);
                         size_t line_len = nl ? (size_t)(nl - src) + 1 : remaining;
-                        
+
                         char line[1024];
                         size_t copy_len = line_len < sizeof(line) ? line_len : sizeof(line) - 1;
                         memcpy(line, src, copy_len);
                         line[copy_len] = '\0';
-                        
-                        int keep = 1;
-                        if (strcmp(WKALI_FORCE_EXPLOIT, "umtx2") == 0) {
-                            if (strstr(line, "/slopkit/")) keep = 0;
-                        } else if (strcmp(WKALI_FORCE_EXPLOIT, "poops") == 0
-                            || strcmp(WKALI_FORCE_EXPLOIT, "p2jb") == 0) {
-                            if (strstr(line, "/umtx2/")) keep = 0;
-                        } else {
-                            if (fw <= 5.50f && strstr(line, "/slopkit/")) keep = 0;
-                            if (fw > 5.50f && strstr(line, "/umtx2/")) keep = 0;
-                        }
-                        
-                        if (keep) {
+
+                        if (!strstr(line, exploit_dir)) {
                             memcpy(dst, src, line_len);
                             dst += line_len;
                         }
-                        
+
                         src += line_len;
                         remaining -= line_len;
                     }
-                    
+
                     if (mem_mode == MHD_RESPMEM_MUST_FREE) free(payload);
                     payload = filtered;
                     payload_size = dst - filtered;

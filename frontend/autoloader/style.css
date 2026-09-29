@@ -13,7 +13,7 @@ body {
 body {
   font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
   background: #070b14;
-  background: linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
+  background: -webkit-linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
   color: #e2e8f0;
   min-height: 100%;
   overflow: hidden;
@@ -41,7 +41,7 @@ body {
   -webkit-justify-content: center;
   justify-content: center;
   background: #070b14;
-  background: linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
+  background: -webkit-linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
   opacity: 1;
   -webkit-transition: opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0.45s;
   transition: opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0.45s;
@@ -119,11 +119,16 @@ body {
   -webkit-justify-content: center;
   justify-content: center;
   background: #070b14;
-  background: linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
+  background: -webkit-linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
 }
 
 main[hidden] {
   display: none !important;
+}
+
+/* The iframe's document runs the exploit and reports back to app.js. */
+#exploit {
+  display: none;
 }
 
 #progressContainer {
@@ -138,13 +143,15 @@ main[hidden] {
   overflow: hidden;
 }
 
+/* Full-width element scaled on the x axis (app.js drives scaleX), so the
+   bar never reflows the label sitting on top of it. */
 #progressBar {
   position: absolute;
   top: 0;
   left: 0;
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, #1d4ed8 0%, #2563eb 40%, #38bdf8 100%);
+  background: -webkit-linear-gradient(90deg, #1d4ed8 0%, #2563eb 40%, #38bdf8 100%);
   -webkit-transform: scaleX(0);
   transform: scaleX(0);
   -webkit-transform-origin: left center;
@@ -160,6 +167,7 @@ main[hidden] {
   left: -60%;
   width: 50%;
   height: 100%;
+  background: -webkit-linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
   -webkit-animation: shimmer 2s infinite;
   animation: shimmer 2s infinite;
@@ -173,6 +181,19 @@ main[hidden] {
 @keyframes shimmer {
   0% { left: -60%; }
   100% { left: 120%; }
+}
+
+/* Failure tint: a chain error line or a failed autoload handoff. Without a
+   log view an error would be gone by the next tick, and a chain that dies
+   mid-stage just looks stalled. */
+#progressContainer.bad {
+  border-color: rgba(248, 113, 113, 0.45);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04), 0 0 24px rgba(248, 113, 113, 0.12);
+}
+
+#progressContainer.bad #progressBar {
+  background: -webkit-linear-gradient(90deg, #7f1d1d 0%, #dc2626 45%, #f87171 100%);
+  background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 45%, #f87171 100%);
 }
 
 #progressLabel {
@@ -197,237 +218,4 @@ main[hidden] {
   text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   z-index: 1;
   pointer-events: none;
-}
-
-
-/* p2jb live statistics panel: our own rendering of the exploit's #livestat
-   readout (phase + OVERALL bars, ETA, worker progress, detail counters),
-   mirrored by app.js. Hidden for every other chain; while visible the log
-   shrinks and this panel fills the space below. */
-#p2jbStats {
-  width: 82%;
-  max-width: 1220px;
-  margin-top: 1.5rem;
-  padding: 1.35rem 1.6rem;
-  background: #05070d;
-  border: 1px solid #1e3a5f;
-  border-radius: 12px;
-  font-family: "SFMono-Regular", Menlo, Monaco, "Cascadia Mono", monospace;
-}
-
-#p2jbStats[hidden] {
-  display: none !important;
-}
-
-body.p2jb-stats #loader {
-  -webkit-box-pack: center;
-  -webkit-justify-content: center;
-  justify-content: center;
-}
-
-/* The panel carries all progress info — the slim bar would only duplicate
-   its OVERALL row. Restored when the panel collapses. */
-body.p2jb-stats #progressContainer {
-  display: none;
-}
-
-.stats-head {
-  display: -webkit-box;
-  display: -webkit-flex;
-  display: flex;
-  -webkit-box-align: baseline;
-  -webkit-align-items: baseline;
-  align-items: baseline;
-  margin-bottom: 0.8rem;
-}
-
-.stats-head > * {
-  margin-right: 1rem;
-}
-
-.stats-title {
-  font-size: 1.45rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #e2e8f0;
-}
-
-.stats-chip {
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #7dd3fc;
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  border-radius: 999px;
-  padding: 0.25rem 0.85rem;
-}
-
-.stats-clock {
-  margin-left: auto;
-  margin-right: 0;
-  font-size: 1.05rem;
-  color: #94a3b8;
-}
-
-.stats-status {
-  min-height: 1.5em;
-  margin-bottom: 0.6rem;
-  font-size: 1.2rem;
-  color: #b8c4d2;
-  overflow-wrap: break-word;
-  word-break: break-word;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.stats-status.bad {
-  color: #f87171;
-}
-
-/* Counters + per-worker bars share one row: detail text left, the worker
-   strip filling the rest (wrapping when upstream feeds many workers). */
-.stats-infoline {
-  display: -webkit-box;
-  display: -webkit-flex;
-  display: flex;
-  -webkit-box-align: start;
-  -webkit-align-items: flex-start;
-  align-items: flex-start;
-  margin-bottom: 0.8rem;
-}
-
-/* Extra livestat lines upstream feeds beyond the headline (byte counters,
-   "queued / in-pipe", race tallies, ...). */
-.stats-detail {
-  -webkit-flex: 0 1 auto;
-  flex: 0 1 auto;
-  margin-right: 1.5rem;
-  font-size: 1rem;
-  line-height: 1.5;
-  color: #8fa1b3;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  word-break: break-word;
-}
-
-.stats-detail[hidden] {
-  display: none !important;
-}
-
-/* Per-worker progress strip (upstream's "per-core:" line during the leak):
-   compact bars filling the right side with percentages inside. */
-#p2jbGroups {
-  -webkit-flex: 1 1 auto;
-  flex: 1 1 auto;
-  display: -webkit-box;
-  display: -webkit-flex;
-  display: flex;
-  -webkit-flex-wrap: wrap;
-  flex-wrap: wrap;
-  gap: 1.1rem;
-  margin-top: 0.15rem;
-}
-
-#p2jbGroups[hidden] {
-  display: none !important;
-}
-
-#p2jbGroups .group {
-  -webkit-flex: 1 1 0%;
-  flex: 1 1 0%;
-  min-width: 90px;
-}
-
-#p2jbGroups .gtrack {
-  position: relative;
-  display: block;
-  height: 1.35rem;
-  background: #131c2e;
-  border: 1px solid #223452;
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-#p2jbGroups .gpct {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  text-align: center;
-  font-size: 0.82rem;
-  font-weight: 700;
-  line-height: 1.35rem;
-  color: #dfe9f5;
-  letter-spacing: 0.02em;
-}
-
-.stats-bar-row {
-  margin-top: 0.85rem;
-}
-
-.stats-bar-row.overall {
-  margin-top: 1.1rem;
-}
-
-.stats-bar-label {
-  display: -webkit-box;
-  display: -webkit-flex;
-  display: flex;
-  -webkit-box-pack: justify;
-  -webkit-justify-content: space-between;
-  justify-content: space-between;
-  margin-bottom: 0.4rem;
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #8fa1b3;
-}
-
-.stats-bar-label span:last-child {
-  color: #e2e8f0;
-}
-
-.stats-track {
-  position: relative;
-  height: 1.25rem;
-  background: #131c2e;
-  border: 1px solid #223452;
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.stats-track.big {
-  height: 1.7rem;
-}
-
-.stats-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: #38bdf8;
-  background: -webkit-linear-gradient(90deg, #2563eb 0%, #38bdf8 100%);
-  -webkit-transform: scaleX(0);
-  transform: scaleX(0);
-  -webkit-transform-origin: left center;
-  transform-origin: left center;
-}
-
-body.p2jb-done .stats-fill {
-  background: #16c60c;
-  background: -webkit-linear-gradient(90deg, #15803d 0%, #47c76a 100%);
-}
-
-.stats-meta {
-  margin-top: 0.4rem;
-  font-size: 1rem;
-  color: #7b8fa3;
-}
-
-.stats-meta.stalled {
-  color: #fbbf24;
 }
