@@ -142,10 +142,10 @@ dev server.
 (`tools/apply_relapse_patch.sh`, run automatically by the Makefile).
 
 The build copy is pruned to the files needed at runtime: the README, upstream dev server and
-unused bundled payloads are removed. Only the kexp shellcode remains in its payload directory;
-Relapse boots the **shared** elfldr, then sends the app's single `payload.elf` from
+bundled payloads are removed completely. Both the **shared** elfldr and **shared** kexp binary
+come from the app-level `shared/` directory, and Relapse sends the app's single `payload.elf` from
 the app-level `payloads/` directory. This lets the registry and host zip include staged files
-without per-exploit payload filters.
+without per-exploit payload filters or duplicated binaries.
 
 The patch (in `relapse/src/main.js` and `relapse/src/kexp.js`):
 
@@ -158,9 +158,11 @@ The patch (in `relapse/src/main.js` and `relapse/src/kexp.js`):
   replaces upstream's "press R2 for kstuff / shadowmountplus / etaHEN" step; without
   `?autoload=`, the stock R2 path remains intact. If the chain never gets elfldr up, failure is
   reported rather than left pending.
-- Asset paths remain relative to the exploit page: its kexp comes from its own `payloads/`,
-  the shared elfldr comes from `../shared/`, and `payload.elf` comes from
-  `../payloads/`.
+- Asset paths remain relative to the exploit page: the shared kexp and elfldr come from
+  `../shared/`, and `payload.elf` comes from `../payloads/`.
+- Replaces upstream in-memory binary patching with zero binary patching: pre-resolved symbols are
+  passed via the standard `KXP2` API table extension in `payload_args_t` (identical to Poops),
+  executing `kexp-ps5.bin` untouched.
 - Removes the per-request offsets cache-buster. AppCache keys include query strings, so the
   upstream `?v=` + `Date.now()` URL would miss the manifest. The versioned app directory already
   provides a stable cache key for each build.

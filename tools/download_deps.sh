@@ -36,6 +36,11 @@ ELFLDR_REPO="itsPLK/ps5-elfldr"
 ELFLDR_TAG="v0.26-bb1e117"
 ELFLDR_DEST="$ROOT/frontend/autoloader/shared/elfldr-ps5.elf"
 
+# Shared kexp (same binary across all exploit chains)
+KEXP_REPO="itsPLK/ps5-kexp"
+KEXP_TAG="v0.8-24cf6e5"
+KEXP_DEST="$ROOT/frontend/autoloader/shared/kexp-ps5.bin"
+
 # Bundled autoload payload
 PAYLOAD_SUBMODULE="$ROOT/third_party/ps5-unified-autoloader"
 PAYLOAD_REPO="itsPLK/ps5-unified-autoloader"
@@ -110,13 +115,14 @@ except Exception as exc:
     print(f"Error: could not fetch release {tag} ({exc}).", file=sys.stderr)
     sys.exit(1)
 
+ext = os.path.splitext(dest)[1]
 asset = None
 for a in release.get("assets", []):
-    if a.get("name", "").endswith(".elf"):
+    if a.get("name", "").endswith(ext):
         asset = a
         break
 if asset is None:
-    print(f"Error: release {tag} has no .elf asset.", file=sys.stderr)
+    print(f"Error: release {tag} has no {ext} asset.", file=sys.stderr)
     sys.exit(1)
 
 digest = asset.get("digest", "")
@@ -172,4 +178,5 @@ fi
 PAYLOAD_TAG=$(git -C "$PAYLOAD_SUBMODULE" describe --tags --always)
 
 download_release "$ELFLDR_REPO" "$ELFLDR_TAG" "$ELFLDR_DEST"
+download_release "$KEXP_REPO" "$KEXP_TAG" "$KEXP_DEST"
 download_release "$PAYLOAD_REPO" "$PAYLOAD_TAG" "$PAYLOAD_DEST"
