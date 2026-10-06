@@ -152,9 +152,10 @@ host: $(WKAL_HOST)
 
 # Host-only checks: firmware routing, the message handoff, the compact UI's
 # mirroring and the offline manifest. They never execute console code. Needs
-# node and a prepared frontend copy, but no SDK and no ELF.
+# node and prepared frontend copies, but no SDK and no ELF. umtx2 is prepared
+# too so the packaging check sees the same three chains the real build stages.
 .PHONY: test
-test: relapse-prepare slopkit-prepare
+test: relapse-prepare slopkit-prepare umtx2-prepare
 	node tests/relapse.test.cjs
 	node tests/relapse_ui.test.cjs
 	$(PYTHON) -m unittest discover -s tests -p 'test_*.py'

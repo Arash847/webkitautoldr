@@ -93,12 +93,20 @@ jobs:
           chmod +x tools/download_deps.sh
           ./tools/download_deps.sh
 
-      - name: Host tests
+      - name: Prepare exploit copies
         run: |
-          # Routing, message handoff, compact UI and offline manifest.
-          # Host-only: no console code is executed.
+          # relapse / slopkit / umtx2 patched copies + check_exploit_js.
           chmod +x tools/*.sh
-          make test
+          make relapse-prepare slopkit-prepare umtx2-prepare
+
+      - name: Test routing, message handoff and payload transfer
+        run: node tests/relapse.test.cjs
+
+      - name: Test compact UI
+        run: node tests/relapse_ui.test.cjs
+
+      - name: Test offline manifest and packaging
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
 
       - name: Build ELF
         run: |
