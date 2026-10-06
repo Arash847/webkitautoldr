@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">PS5 WebKit Autoloader</h1>
 &nbsp;
-<p align="center">Automatically loads the WebKit exploit and your elf payloads.<br>Supports firmwares <b>1.00&ndash;5.50</b> and <b>7.00&ndash;13.60</b>.</p>
+<p align="center">Automatically loads the WebKit exploit and your elf payloads.<br>Supports firmwares <b>1.00&ndash;5.50</b> and <b>7.00&ndash;13.60</b> (except 9.05 / 11.40).</p>
 
 <p align="center">
   <a href=".github/screenshots/webkit_autoloader.jpeg"><img src=".github/screenshots/webkit_autoloader.jpeg" width="260" alt="WebKit Autoloader - exploit running" /></a>
@@ -24,7 +24,7 @@ WebKit exploits are usually loaded by pointing your PS5's DNS at some server hos
 This autoloader does it differently:
 
 - **Fully offline, no third-party DNS.** After a one-time install from your PC, everything is served straight from your PS5. There's nothing external to go down or change behind your back.  
-  Firmwares 12.02–13.60 run **Relapse**, which requires an active network interface (Wi-Fi or Ethernet connected to a local network; Internet access is not required).
+  Firmwares 7.00–13.60 run **Relapse**, which requires an active network interface (Wi-Fi or Ethernet connected to a local network; Internet access is not required). 9.05 and 11.40 are not supported by this build.
 - **One-time setup, then a homescreen shortcut.** Once it's installed, you don't need a PC or the internet — just launch "WebKit Autoloader" from the homescreen and you're done.
 - **Payloads loaded the way you already know.** After the exploit chain runs, your payloads are sent just like in [Y2JB](https://github.com/itsPLK/ps5-y2jb-autoloader) / [BD-JB](https://github.com/itsPLK/ps5-bdjb-autoloader) / [Lua](https://github.com/itsPLK/ps5-lua-autoloader) autoloaders — via **Payload Manager**, or a custom `autoload.txt`.
 
@@ -88,8 +88,7 @@ payloads never touch the network — but on firmwares 7.00–13.60 the **Relapse
 stage leaks a kernel address through a routing socket, which needs **one network
 interface that holds an IPv4 address**. With no link or no DHCP lease every interface
 is `0.0.0.0` and the chain stops with
-`Kernel: no interface has an address`. **Poops** (7.00–12.00) needs a live interface too,
-since it triggers off network activity.
+`Kernel: no interface has an address`.
 
 Internet access is **not** required — only an address:
 
@@ -110,7 +109,7 @@ The latest installer payload will re-create the homescreen app and refresh the c
 <Details>
 <Summary><i>How to use a custom ELF Loader?</i></Summary>
 
-On firmwares 7.00–13.60 (Relapse / Poops), the autoloader uses a custom version of **elfldr** that only accepts connections from the PS5 itself (localhost). This improves security by preventing unauthorized devices on your network from sending payloads to your console. On firmwares 1.00–5.50 (umtx2), the stock elfldr is booted.
+On firmwares 7.00–13.60 (Relapse), the autoloader uses a custom version of **elfldr** that only accepts connections from the PS5 itself (localhost). This improves security by preventing unauthorized devices on your network from sending payloads to your console. On firmwares 1.00–5.50 (umtx2), the stock elfldr is booted.
 
 If you want to use a "normal" ELF Loader that allows sending payloads from any device, you can simply load it through **Payload Manager**.
 
@@ -142,8 +141,8 @@ execute console code.
 ## Credits
 
 * **[idlesauce](https://github.com/idlesauce)** & contributors — [umtx2](https://github.com/idlesauce/umtx2)
-* **[jordyidk](https://github.com/jordyidk)** & contributors — [slopkit (Poops)](https://github.com/jordyidk/slopkit)
-* **[soniciso1](https://github.com/soniciso1)** — [Relapse](https://github.com/soniciso1/relapse), bringing down Poops support to lower firmwares (7.00–8.60)
+* **[jordyidk](https://github.com/jordyidk)** & contributors — [slopkit](https://github.com/jordyidk/slopkit)
+* **[soniciso1](https://github.com/soniciso1)** — [Relapse](https://github.com/soniciso1/relapse)
 * **[ntfargo](https://github.com/ntfargo)** & contributors — [Relapse](https://github.com/ntfargo/Relapse-Exploit)
 * **[ufm42](https://github.com/ufm42)** - [kexp](https://github.com/ufm42/kexp)
 * **[john-tornblom](https://github.com/john-tornblom)** — [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk/) and [elfldr](https://github.com/ps5-payload-dev/elfldr)

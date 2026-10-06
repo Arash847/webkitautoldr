@@ -47,8 +47,6 @@ jobs:
           git -C third_party/ps5-unified-autoloader checkout 915a65e232e03e293829e34bca18866659b2bcf4
           git clone https://github.com/ntfargo/Relapse-Exploit.git third_party/relapse
           git -C third_party/relapse checkout d8e6896b5cb33b04f1e038a5d698d3d4aee5947c
-          git clone https://github.com/itsPLK/slopkit.git third_party/slopkit
-          git -C third_party/slopkit checkout e69a21762f8d12479443502ce19ea4a575295c48
           git clone https://github.com/idlesauce/umtx2.git third_party/umtx2
           git -C third_party/umtx2 checkout a080beb74d9e4bc34f3563798b716bd86b2d6ee0
           git clone https://github.com/itsPLK/ps5-elfldr.git third_party/ps5-elfldr
@@ -95,9 +93,9 @@ jobs:
 
       - name: Prepare exploit copies
         run: |
-          # relapse / slopkit / umtx2 patched copies + check_exploit_js.
+          # relapse + umtx2 patched copies, each parse-checked by check_exploit_js.
           chmod +x tools/*.sh
-          make relapse-prepare slopkit-prepare umtx2-prepare
+          make relapse-prepare umtx2-prepare
 
       - name: Test routing, message handoff and payload transfer
         run: node tests/relapse.test.cjs

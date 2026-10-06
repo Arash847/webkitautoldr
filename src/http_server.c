@@ -37,7 +37,8 @@ atomic_int install_completed = 0;
  * visible to the main loop. */
 atomic_int webkit_data_cleared = 0;
 
-/* Active exploit chosen for this installation session ("poops", "relapse", or "umtx2"). */
+/* Active exploit for this installation session ("relapse" or "umtx2"). This
+   fork does not ship poops, so there is nothing to choose between on 7.00-12.00. */
 static char active_exploit[16] = {0};
 
 static void add_cors_headers(struct MHD_Response *resp) {
@@ -54,10 +55,6 @@ static inline int is_fw_umtx2(float fw) {
     return fw > 0.0f && fw <= 5.50f;
 }
 
-static inline int is_fw_poops(float fw) {
-    return fw >= 7.00f && fw <= 12.00f;
-}
-
 static inline int is_fw_relapse(float fw, const char *fw_str) {
     if (fw < 7.00f || fw > 13.60f) return 0;
     if (fw_str && (strcmp(fw_str, "9.05") == 0 || strcmp(fw_str, "11.40") == 0)) return 0;
@@ -69,27 +66,15 @@ static const char *resolve_exploit(float fw, const char *fw_str, const char *pre
     if (strcmp(WKALI_FORCE_EXPLOIT, "auto") != 0) {
         return WKALI_FORCE_EXPLOIT;
     }
-    int has_umtx2 = is_fw_umtx2(fw);
-    int has_poops = is_fw_poops(fw);
-    int has_relapse = is_fw_relapse(fw, fw_str);
-
-    if (has_umtx2) {
+    if (is_fw_umtx2(fw)) {
         return "umtx2";
     }
-    if (has_poops && has_relapse) {
-        if (preferred && strcmp(preferred, "poops") == 0) return "poops";
-        return "relapse"; /* default to relapse on dual firmwares */
-    }
-    if (has_poops) {
-        return "poops";
-    }
-    if (has_relapse) {
+    if (is_fw_relapse(fw, fw_str)) {
         return "relapse";
     }
     /* Fallback for desktop testing / unknown fw (fw == 0) */
     if (fw == 0.0f) {
-        if (preferred && (strcmp(preferred, "poops") == 0 ||
-                          strcmp(preferred, "relapse") == 0 ||
+        if (preferred && (strcmp(preferred, "relapse") == 0 ||
                           strcmp(preferred, "umtx2") == 0)) {
             return preferred;
         }
@@ -129,8 +114,7 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
         fw = strtof(fw_arg, NULL);
     }
     const char *exploit_arg = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "exploit");
-    if (exploit_arg && (strcmp(exploit_arg, "poops") == 0 ||
-                        strcmp(exploit_arg, "relapse") == 0 ||
+    if (exploit_arg && (strcmp(exploit_arg, "relapse") == 0 ||
                         strcmp(exploit_arg, "umtx2") == 0)) {
         strncpy(active_exploit, exploit_arg, sizeof(active_exploit) - 1);
         active_exploit[sizeof(active_exploit) - 1] = '\0';
@@ -238,15 +222,6 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
             MHD_add_response_header(resp, "Content-Type", "text/plain");
             http_status = MHD_HTTP_INTERNAL_SERVER_ERROR;
         }
-    } else if (strcmp(url, "/selected_exploit") == 0 ||
-               (strlen(url) >= 17 && strcmp(url + strlen(url) - 17, "/selected_exploit") == 0)) {
-        const char *preferred = exploit_arg ? exploit_arg : (active_exploit[0] ? active_exploit : NULL);
-        const char *sel = resolve_exploit(fw, fw_str, preferred);
-        if (!sel) sel = "unsupported";
-        resp = MHD_create_response_from_buffer(strlen(sel), (void *)sel,
-                                               MHD_RESPMEM_PERSISTENT);
-        MHD_add_response_header(resp, "Content-Type", "text/plain");
-        http_status = MHD_HTTP_OK;
     } else {
         const FileEntry *entry = registry_lookup(url);
         if (entry) {
@@ -296,19 +271,13 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
                 mem_mode = MHD_RESPMEM_MUST_FREE;
             }
 
-            /* When on firmware supported by both Poops and Relapse (7.00 - 12.00 except 9.05/11.40),
-               the installer page must ask the user which exploit to install BEFORE
-               proceeding with caching. If no exploit has been chosen yet, strip
-               manifest="..." from index.html so WebKit does NOT start caching.
-               Also strip manifest on unsupported firmwares so WebKit never starts caching. */
-            int is_unsupported = (fw > 0.0f && !is_fw_umtx2(fw) && !is_fw_poops(fw) && !is_fw_relapse(fw, fw_str));
-            int is_dual_fw = (is_fw_poops(fw) && is_fw_relapse(fw, fw_str)) ||
-                             (fw == 0.0f && strcmp(WKALI_FORCE_EXPLOIT, "auto") == 0);
-            int prompt_user = (strcmp(WKALI_FORCE_EXPLOIT, "auto") == 0) && is_dual_fw &&
-                              (exploit_arg == NULL) && (active_exploit[0] == '\0');
+            /* On an unsupported firmware WebKit must never start caching, so strip
+               manifest="..." from index.html. (This fork ships no exploit
+               choice, so there is no prompt to wait for first.) */
+            int is_unsupported = (fw > 0.0f && !is_fw_umtx2(fw) && !is_fw_relapse(fw, fw_str));
 
             if ((strcmp(url, ROUTE_INDEX) == 0 || strcmp(url, ROUTE_INDEX_HTML) == 0) &&
-                (prompt_user || is_unsupported)) {
+                is_unsupported) {
                 char *copy = malloc(payload_size + 1);
                 if (copy) {
                     memcpy(copy, payload, payload_size);
@@ -326,7 +295,8 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
                 }
             }
 
-            /* Dynamically strip incompatible exploit files from the cache manifest */
+            /* Only the chain this console can run is cached; the other is dropped so the
+               browser never downloads (or caches) assets it cannot use. */
             if (strcmp(url, ROUTE_CACHE_MANIFEST) == 0) {
                 const char *preferred = exploit_arg ? exploit_arg : (active_exploit[0] ? active_exploit : NULL);
                 const char *chosen = resolve_exploit(fw, fw_str, preferred);
@@ -365,11 +335,9 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
 
                         int keep = 1;
                         if (strcmp(chosen, "umtx2") == 0) {
-                            if (strstr(line, "/slopkit/") || strstr(line, "/relapse/")) keep = 0;
-                        } else if (strcmp(chosen, "poops") == 0) {
-                            if (strstr(line, "/umtx2/") || strstr(line, "/relapse/")) keep = 0;
+                            if (strstr(line, "/relapse/")) keep = 0;
                         } else if (strcmp(chosen, "relapse") == 0) {
-                            if (strstr(line, "/umtx2/") || strstr(line, "/slopkit/")) keep = 0;
+                            if (strstr(line, "/umtx2/")) keep = 0;
                         }
 
                         if (keep) {

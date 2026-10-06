@@ -1,18 +1,20 @@
 # PS5 WebKit Autoloader: Architecture
 
 A persistent entry point for PS5 payloads that runs a WebKit/kernel exploit chain
-and autoloads your payloads fully offline. Three exploit chains are bundled and
+and autoloads your payloads fully offline. Two exploit chains are bundled and
 selected by firmware:
 
 - **umtx2** (FW 1.00–5.50) — idlesauce umtx2 chain (`umtx2/`). Fully offline.
-- **poops** (FW 7.00–12.00) — slopkit poops chain (`slopkit/slopkit/poops.html`). Fully offline.
-- **relapse** (FW 7.00–13.60) — relapse chain (`relapse/`). Requires an active network interface.
+- **relapse** (FW 7.00–13.60, except 9.05 and 11.40) — relapse chain (`relapse/`).
+  Requires an active network interface.
 
-On firmwares supported by both chains (7.00–12.00), the installer page asks the user
-before caching which chain to install: Poops (for fully offline support) or Relapse
-(newer chain; requires active Wi-Fi/Ethernet network interface).
+Upstream also ships **poops** (slopkit, FW 7.00–12.00, fully offline) with an installer
+prompt to choose between the two on firmwares both support. This fork does not: its
+autoloader patch would not apply to a pristine checkout, which broke the build on CI. FW
+9.05 and 11.40 therefore have no chain here — relapse has no offsets for them and the
+slopkit fallback is gone.
 
-All chains converge on the same result: a `WKAL00001` homescreen app that runs the
+Both chains converge on the same result: a `WKAL00001` homescreen app that runs the
 exploit, boots elfldr, and autoloads your payload through it.
 
 ## Repository layout
@@ -25,18 +27,18 @@ exploit, boots elfldr, and autoloads your payload through it.
 | `pc-host/` | The PC host script (`host.py`) + overrides for the bootstrap flow |
 | `src/` | Native installer ELF (HTTP server, app installer, browser launcher) |
 | `include/` | Headers, incl. generated `wkali_version.h` and `file_registry.{h,c}` |
-| `patches/` | The relapse, slopkit, and umtx2 autoloader patch files |
+| `patches/` | The relapse and umtx2 autoloader patch files |
+| `tests/` | Host-only checks run by `make test` (no console code executed) |
 | `tools/` | Build, version, icon, registry scripts, and dependency downloader |
 | `assets/` | Icon source and PS5 app metadata templates |
-| `third_party/` | `relapse`, `slopkit`, `umtx2`, `ps5-elfldr` and `ps5-unified-autoloader` submodules (pinned) |
+| `third_party/` | `relapse`, `umtx2`, `ps5-elfldr` and `ps5-unified-autoloader` submodules (pinned) |
 
 ## Two setup flows
 
 **Installer ELF (already jailbroken).** Send `webkit-autoloader-installer_v*.elf` to the console
 (elfldr or Payload Manager). It opens the browser once to cache the frontend via AppCache,
 creates the `WKAL00001` app only after that cache succeeds, then exits. From then on the app
-runs the chain offline from the cache. On FW 7.00–12.00, it prompts the user to pick Poops or
-Relapse before starting the cache.
+runs the chain offline from the cache.
 
 **PC host (not jailbroken).** Run `webkit-autoloader-host_v*.py` / `.exe` on a PC, point the
 console's DNS at it, and open the User's Guide. The host spoofs `manuals.playstation.net`
@@ -47,33 +49,32 @@ instead of the unified-autoloader — so this flow installs the homescreen app.
 
 - A splash screen and a progress pill — **no log terminal and no footer**. The exploit
   runs in a **hidden** same-origin iframe. On load, `app.js` picks the chain from the
-  firmware in the user-agent (`PlayStation 5/x.xx`): **umtx2** for <=5.50, **poops** for
-  7.00–12.00, and **relapse** for 7.00–13.60 (except 9.05 and 11.40). On dual-compatible
-  firmwares, the user's installed choice is loaded (defaulting to relapse).
+  firmware in the user-agent (`PlayStation 5/x.xx`): **umtx2** for <=5.50 and **relapse** for
+  7.00–13.60 (except 9.05 and 11.40, which have no chain here).
   The iframe element is `display: none`; its document still runs the chain and sends
   log and completion messages to the parent.
-- A `FORCE_EXPLOIT` build-time override (`auto | umtx2 | poops | relapse`; or a `?force=`
+- A `FORCE_EXPLOIT` build-time override (`auto | umtx2 | relapse`; or a `?force=`
   query) bypasses the table so a specific chain can be exercised on any firmware; the
   exploit's own firmware guard still applies.
 - umtx2 auto-runs its chain via the `on_load_autorun` sessionStorage key (set by
-  `app.js` before arming); poops and relapse auto-run on load from their query parameters.
+  `app.js` before arming); relapse auto-runs on load from its `?autoload=` query.
 - The iframe is blanked to `about:blank` at script parse and armed on
   `DOMContentLoaded`, so a WebProcess-crash page restore never auto-runs the chain and
   the chain only starts once the splash is on its way out.
 - `app.js` mirrors each chain's console log and receives the `?autoload` result
   via `postMessage`. Because there is no log view, the mirror *is* the UI: the newest
-  non-error line drives the progress label, Relapse milestones and Poops stages advance
-  the progress bar (both monotonic — the bar never rewinds mid-run), an error line tints
-  the pill red until the run recovers, and the autoload result sets the final state.
+  non-error line drives the progress label, Relapse milestones advance the progress bar
+  (monotonic — it never rewinds mid-run), an error line tints the pill red until the run
+  recovers, and the autoload result sets the final state.
 - Firmware routing uses ranges, not version tables, so a new firmware needs no code
   change. Firmwares inside a supported range that have no offsets file (betas, skipped
   versions) are therefore routed to the chain and refused by *its* guard —
-  `relapse/src/firmware.js` and `slopkit/slopkit/main.js` both own exact lists. Keep
-  those guards in step with the offsets actually shipped.
+  `relapse/src/firmware.js` owns an exact list. Keep that guard in step with the offsets
+  actually shipped.
 - `payload.elf` is a virtual name: the PC host serves the installer ELF there, the homescreen app
   serves the real unified-autoloader. All exploits autoload the same `payload.elf`. umtx2 (FW
   1.00–5.50) boots its **own bundled elfldr** (`/app/<version>/umtx2/payloads/elfldr-ps5.elf`, kept
-  from the umtx2 submodule like stock umtx2); poops (7.00–12.00) and relapse (7.00–13.60) boot
+  from the umtx2 submodule like stock umtx2); relapse (7.00–13.60) boots
   the **shared elfldr** (`/app/<version>/shared/elfldr-ps5.elf`).
 
 
@@ -170,7 +171,7 @@ The patch (in `relapse/src/main.js` and `relapse/src/kexp.js`):
 - Asset paths remain relative to the exploit page: the shared kexp and elfldr come from
   `../shared/`, and `payload.elf` comes from `../payloads/`.
 - Replaces upstream in-memory binary patching with zero binary patching: pre-resolved symbols are
-  passed via the standard `KXP2` API table extension in `payload_args_t` (identical to Poops),
+  passed via the standard `KXP2` API table extension in `payload_args_t`,
   executing `kexp-ps5.bin` untouched.
 - Removes the per-request offsets cache-buster. AppCache keys include query strings, so the
   upstream `?v=` + `Date.now()` URL would miss the manifest. The versioned app directory already
@@ -214,34 +215,31 @@ To update umtx2: `git -C third_party/umtx2 fetch && git -C third_party/umtx2 che
 re-run the script, and regenerate `patches/umtx2-autoload.patch` if it no longer applies. Keep the
 `?v=` cache-buster on `UMTX2_IFRAME_URL` in `app.js`/`gen_file_registry.py` in sync.
 
-## Slopkit integration and our KP fix
+## Slopkit / poops: not shipped here
 
-`slopkit` is a pinned, **pristine** submodule; `tools/apply_slopkit_patch.sh` copies it to the
-gitignored `frontend/autoloader/slopkit/` and applies `patches/slopkit-autoload.patch`. Poops is
-the only chain the autoloader wires up (p2jb's files ride along in the copy but nothing arms
-them). Regenerate the patch the same way as the others, from the scratch repo the script leaves
-behind:
+Upstream v0.5.2 re-introduced poops (slopkit) as a third chain with an installer prompt to
+pick it on firmwares where both it and Relapse work, because poops is the **fully offline**
+option while Relapse needs a network interface. This fork removed it again: upstream's
+`patches/slopkit-autoload.patch` does not apply to a pristine checkout (its context lines
+carry mixed CRLF/LF, so `git apply` rejects it on a Linux runner, and regenerating it from a
+CRLF-normalised worktree fails for the mirror-image reason), which made `make
+slopkit-prepare` — and therefore every build — fail on CI.
 
-```sh
-git -C frontend/autoloader/slopkit diff --cached --full-index <pristine-commit> > patches/slopkit-autoload.patch
-```
-
-Write it with a byte-exact redirection (`cmd /c "git ... > file"` on Windows, or `git diff
---output=`). PowerShell's `>` re-encodes and injects CRLF, which makes the patch fail to apply
-on the Linux CI runner — `*.patch -text` in `.gitattributes` cannot save a patch that was already
-mangled in the working tree.
-
-**Our addition to that patch (not upstream):** after stage 3 certifies `aliasesRepaired`, the
-iov/uio racer threads are unblocked and terminated (`POOPS-CLEANUP-RACERS-PRE` /
-`-DONE` markers in `poops.js`). Those threads park in blocking kernel calls holding dirty
-socket/pipe state, which background daemons (network stack, syslogd) trip over — the main
-cause of post-jailbreak kernel panics on poops. Terminating them clears that state while the
-file descriptors stay parked, exactly as before. Ported from `srbraboo/ps5-webkit-autoloader`
-(`048c5ec`). If you regenerate this patch from the submodule, re-apply the hunk.
+Consequences, all deliberate:
+- FW **9.05 and 11.40 are unsupported** here: Relapse has no offsets for them and the
+  slopkit fallback is gone. `app.js` and the installer page both report that instead of
+  arming a chain that cannot run.
+- The **KP racer-thread fix** (terminate the parked iov/uio racers once stage 3 certifies
+  `aliasesRepaired`, ported from `srbraboo/ps5-webkit-autoloader` `048c5ec`) went with poops.
+  It lived in the slopkit patch and there is no equivalent to port: Relapse's chain parks a
+  ROP worker on a hijacked return slot instead of racer threads.
+- There is **no fully offline chain for FW 7.00+** in this fork. If that matters more than
+  the build, the way back is upstream's own v0.5.2 patch applied verbatim from a checkout
+  whose line endings match the pristine submodule.
 
 ## Shared elfldr and kexp
 
-relapse and poops (FW 7.00–13.60) boot the **shared** elfldr, served at
+relapse (FW 7.00–13.60) boots the **shared** elfldr, served at
 `/app/<version>/shared/elfldr-ps5.elf` (staged from `frontend/autoloader/shared/`).
 `tools/download_deps.sh` fetches it from the pinned `itsPLK/ps5-elfldr` release (tag
 `ELFLDR_TAG`), sha256-verifies it, and caches the digest in a `.sha256` sidecar so
@@ -273,24 +271,24 @@ names.
 ## This fork's delta
 
 Tracked against upstream `itsPLK/ps5-webkit-autoloader` v0.5.2. Everything else — the relapse
-and slopkit submodules and patches, `check_exploit_js.py`, the range-based firmware routing, the
-exploit selection prompt, the shared elfldr/kexp pins, the native cache filter and the version
-bump — is upstream's.
+submodule and patch, `check_exploit_js.py`, the range-based firmware routing, the shared
+elfldr/kexp pins, the native cache filter and the version bump — is upstream's.
 
+- **No poops.** Upstream's slopkit submodule, patch, prepare script and installer prompt are
+  removed here: the patch does not apply to a pristine checkout, which failed every CI build.
+  FW 9.05/11.40 are therefore unsupported in this fork. See the slopkit section above.
 - **Compact UI** (`frontend/autoloader/{app.js,index.html,style.css}`): a splash screen plus the
   glass progress pill, no log terminal and no footer. The pill is the whole status surface — the
-  mirrored chain line as its label, relapse milestones / poops stages as its (monotonic)
-  progress, a red tint on failure, and `ERROR_HINTS` turning known-deadly failures such as
-  Relapse's offline `kaslr: no interface has an address` into something actionable. Upstream
-  removed their splash in v0.5.2; we keep ours, including the `about:blank` blanking at parse
-  that goes with it. Routing, the selection prompt, `?force=`/`FORCE_EXPLOIT`, message isolation
-  and the "keep the chain's document open" rule are upstream's.
-- **Installer page** (`frontend/installer-page/index.html`): upstream's page and its exploit
-  selection prompt, restyled to the compact look (glass pill with shimmer, no footer).
-- **`patches/slopkit-autoload.patch`**: the KP racer-thread fix described above, plus the patch
-  regenerated as pure LF.
+  mirrored chain line as its label, relapse milestones as its (monotonic) progress, a red tint on
+  failure, and `ERROR_HINTS` turning known-deadly failures such as Relapse's offline `kaslr: no
+  interface has an address` into something actionable. Upstream removed their splash in v0.5.2; we
+  keep ours, including the `about:blank` blanking at parse that goes with it. Routing, message
+  isolation and the "keep the chain's document open" rule are upstream's.
+- **Installer page** (`frontend/installer-page/index.html`): upstream's page (minus the exploit
+  selection prompt, which has nothing to choose between here) restyled to the compact look — glass
+  pill with shimmer, no footer.
 - **`.github/workflows/build.yml`**: an extra push/dispatch build that produces the installer ELF
-  artifact, cloning the submodules at their pinned commits and running `make test` first.
+  artifact, cloning the submodules at their pinned commits and running the host checks first.
 - **`build_deps.sh`**: libmicrohttpd is fetched through a mirror list with retries (ftp.gnu.org
   alone is flaky in CI).
 - **`.gitattributes`**: `*.patch -text`, so autocrlf cannot rewrite the patch bytes `git apply`
