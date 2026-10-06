@@ -99,15 +99,30 @@ assert.equal(ui.pct(), 95);
 ui.push('[+] ' + 'x'.repeat(200));
 assert.ok(ui.label().length <= 68 && ui.label().endsWith('...'));
 
-/* An error has to outlive the next tick. It tints the pill, but it must not
-   overwrite the label: the last progress text is what tells the user where the
-   run actually got to. */
+/* An ordinary error has to outlive the next tick. It tints the pill, but it
+   must not overwrite the label: the last progress text is what tells the user
+   where the run actually got to. */
 const labelBeforeError = ui.label();
 ui.push('[-] Kernel: stopped: aio steering failed');
 assert.equal(ui.tint(), 'bad');
 assert.equal(ui.label(), labelBeforeError);
 ui.push('[*] Attempt 5');
 assert.equal(ui.tint(), 'bad', 'the tint stays until the run recovers');
+
+/* Relapse's KASLR leak needs an interface with an IPv4 address. Offline the
+   console has none and the chain throws "kaslr: no interface has an address" —
+   the run is over, so the label must say what to do instead. */
+const offline = setup();
+offline.push('[+] Kernel: read and write ready');
+assert.equal(offline.label(), 'Kernel: read and write ready');
+offline.push('[-] Kernel: kaslr: no interface has an address');
+assert.equal(offline.tint(), 'bad');
+assert.equal(offline.label(), 'Kernel: no interface address — connect a network, then reload');
+offline.push('[-] Kernel: kaslr: routing socket is gated');
+assert.equal(offline.label(), 'Kernel: routing socket unavailable — connect a network, then reload');
+// The hint is the last thing on screen; it survives further ticks.
+offline.push('[-] Kernel: aio group steering failed');
+assert.equal(offline.label(), 'Kernel: routing socket unavailable — connect a network, then reload');
 
 /* A foreign same-origin document must not be able to finish the run. */
 const before = ui.label();

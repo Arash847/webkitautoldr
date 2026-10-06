@@ -79,6 +79,24 @@ For a fixed, automated payload chain, you can configure payloads manually:
 ## Additional Info
 
 <Details>
+<Summary><i>Does it work without an internet connection?</i></Summary>
+
+Almost. The autoloader itself is served entirely from the console's cache, and the
+payloads never touch the network — but on firmwares 7.00–13.60 the **Relapse** kernel
+stage leaks a kernel address through a routing socket, which needs **one network
+interface that holds an IPv4 address**. With no link or no DHCP lease every interface
+is `0.0.0.0` and the chain stops with
+`Kernel: no interface has an address`.
+
+Internet access is **not** required — only an address:
+
+- Connect the console to any network that hands out a DHCP lease (the router does not need a working WAN), **or**
+- set a static IP in **Settings → Network → Settings** (e.g. `192.168.1.50`, mask `255.255.255.0`). Nothing has to be reachable; the routing query is answered locally by the kernel.
+
+Then reload the page. On 1.00–5.50 (umtx2) there is no such requirement.
+</Details>
+
+<Details>
 <Summary><i>How to update the autoloader?</i></Summary>
 
 The autoloader content is cached on the console, so updating is exactly the same as the initial install. Simply follow the **[Setup Instructions](#setup-instructions)** using the new release files. 

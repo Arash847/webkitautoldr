@@ -184,6 +184,25 @@
     }
   }
 
+  /* Failures the user can actually do something about. Relapse's KASLR leak
+     needs a network interface that holds an IPv4 address: with no lease (or
+     no link at all) every address is 0.0.0.0 and the stage throws
+     "kaslr: no interface has an address", which tells a user nothing. Internet
+     access is NOT required — any interface with an address is enough, so a LAN
+     lease or a static IP in the console's network settings both work. */
+  var ERROR_HINTS = [
+    { re: /no interface has an address/, label: 'Kernel: no interface address — connect a network, then reload' },
+    { re: /routing socket|no routing reply/, label: 'Kernel: routing socket unavailable — connect a network, then reload' },
+    { re: /Worker failed to load|never answered/, label: 'Chain stalled — reload the page to retry' }
+  ];
+
+  function hintFor(text) {
+    for (var i = 0; i < ERROR_HINTS.length; i++) {
+      if (ERROR_HINTS[i].re.test(text)) return ERROR_HINTS[i].label;
+    }
+    return null;
+  }
+
   /* Relapse reports stages rather than a numerical percent. Advance the bar
      only when a known stage has completed; never move it backwards mid-run. */
   function advanceRelapseProgress(text) {
@@ -285,6 +304,11 @@
     uiLog('[' + prefix + '] ' + text, severity);
     if (severity === 'error') {
       markProgressFailed(true);
+      /* An ordinary error keeps the last progress text in the label — where
+         the run got to is still the useful thing. An error we can explain
+         replaces it: the run is over, and the remedy is what matters now. */
+      var hint = hintFor(text);
+      if (hint) setProgressLabel(hint);
     } else {
       if (prefix === 'relapse') advanceRelapseProgress(text);
       if (severity === 'info' || severity === 'success') {
