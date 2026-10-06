@@ -23,9 +23,11 @@ WebKit exploits are usually loaded by pointing your PS5's DNS at some server hos
 
 This autoloader does it differently:
 
-- **Fully offline, no third-party DNS.** After a one-time install from your PC, everything is served straight from your PS5. There's nothing external to go down or change behind your back.
-- **One-time setup, then a homescreen shortcut.** Once it's installed, you don't need a PC or the network at all — just launch "WebKit Autoloader" from the homescreen and you're done.
+- **Fully offline, no third-party DNS.** After a one-time install from your PC, everything is served straight from your PS5. There's nothing external to go down or change behind your back.  
+  Firmwares 12.02–13.60 run **Relapse**, which requires an active network interface (Wi-Fi or Ethernet connected to a local network; Internet access is not required).
+- **One-time setup, then a homescreen shortcut.** Once it's installed, you don't need a PC or the internet — just launch "WebKit Autoloader" from the homescreen and you're done.
 - **Payloads loaded the way you already know.** After the exploit chain runs, your payloads are sent just like in [Y2JB](https://github.com/itsPLK/ps5-y2jb-autoloader) / [BD-JB](https://github.com/itsPLK/ps5-bdjb-autoloader) / [Lua](https://github.com/itsPLK/ps5-lua-autoloader) autoloaders — via **Payload Manager**, or a custom `autoload.txt`.
+
 
 ## Setup Instructions
 
@@ -86,7 +88,8 @@ payloads never touch the network — but on firmwares 7.00–13.60 the **Relapse
 stage leaks a kernel address through a routing socket, which needs **one network
 interface that holds an IPv4 address**. With no link or no DHCP lease every interface
 is `0.0.0.0` and the chain stops with
-`Kernel: no interface has an address`.
+`Kernel: no interface has an address`. **Poops** (7.00–12.00) needs a live interface too,
+since it triggers off network activity.
 
 Internet access is **not** required — only an address:
 
@@ -107,7 +110,7 @@ The latest installer payload will re-create the homescreen app and refresh the c
 <Details>
 <Summary><i>How to use a custom ELF Loader?</i></Summary>
 
-On firmwares 7.00–13.60 (relapse), the autoloader uses a custom version of **elfldr** that only accepts connections from the PS5 itself (localhost). This improves security by preventing unauthorized devices on your network from sending payloads to your console. On firmwares 1.00–5.50 (umtx2), the stock elfldr is booted.
+On firmwares 7.00–13.60 (Relapse / Poops), the autoloader uses a custom version of **elfldr** that only accepts connections from the PS5 itself (localhost). This improves security by preventing unauthorized devices on your network from sending payloads to your console. On firmwares 1.00–5.50 (umtx2), the stock elfldr is booted.
 
 If you want to use a "normal" ELF Loader that allows sending payloads from any device, you can simply load it through **Payload Manager**.
 
@@ -131,15 +134,22 @@ etaHEN.elf
 
 ## For developers
 
-The technical internals and project architecture are documented in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+The technical internals and project architecture are documented in **[ARCHITECTURE.md](ARCHITECTURE.md)**,
+including what this fork changes relative to upstream. `make test` runs the host-only checks
+(firmware routing, payload handoff, the compact UI, the offline manifest) — none of them
+execute console code.
 
 ## Credits
 
 * **[idlesauce](https://github.com/idlesauce)** & contributors — [umtx2](https://github.com/idlesauce/umtx2)
+* **[jordyidk](https://github.com/jordyidk)** & contributors — [slopkit (Poops)](https://github.com/jordyidk/slopkit)
+* **[soniciso1](https://github.com/soniciso1)** — [Relapse](https://github.com/soniciso1/relapse), bringing down Poops support to lower firmwares (7.00–8.60)
 * **[ntfargo](https://github.com/ntfargo)** & contributors — [Relapse](https://github.com/ntfargo/Relapse-Exploit)
+* **[ufm42](https://github.com/ufm42)** - [kexp](https://github.com/ufm42/kexp)
 * **[john-tornblom](https://github.com/john-tornblom)** — [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk/) and [elfldr](https://github.com/ps5-payload-dev/elfldr)
-* **[Mark Adler](https://github.com/madler)** — [puff.c](https://github.com/madler/zlib/tree/master/contrib/puff) (used to decompress embedded frontend files)
+* **[madler](https://github.com/madler)** — [puff](https://github.com/madler/zlib/tree/master/contrib/puff)
 * Everyone else contributing to the PS5 homebrew scene.
+
 
 ## Disclaimer
 

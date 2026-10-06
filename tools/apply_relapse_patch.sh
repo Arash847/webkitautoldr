@@ -44,10 +44,10 @@ mkdir -p "$DEST"
 cp -R "$SOURCE"/. "$DEST"/
 rm -rf "$DEST/.git" "$DEST/.github" "$DEST/.gitignore" "$DEST/README.md" "$DEST/serve.py"
 
-# 2. Prune payloads/ down to the kexp shellcode. elfldr is the shared one from
-#    frontend/autoloader/shared/ (localhost-only), and the optional jailbreak
-#    menu is never loaded by the autoloader.
-find "$DEST/payloads" -maxdepth 1 -type f ! -name 'kexp*.bin' -delete
+# 2. Prune payloads/ completely: elfldr and kexp are the shared binaries
+#    from frontend/autoloader/shared/ (localhost-only), and the optional
+#    jailbreak menu is never loaded by the autoloader.
+rm -rf "$DEST/payloads"
 
 # 3. Turn the copy into a throwaway git repo so `git apply` can handle the
 #    patch. Two commits: pristine relapse, then our autoloader patch.
@@ -75,10 +75,8 @@ else
 fi
 
 # 5. Sanity check: the patched sources must carry our integration markers, the
-#    bundled elfldr must be gone from the sources, the runtime offsets URL must
-#    be the pinned one, and payloads/ must hold only the kexp shellcode. These
-#    markers only exist once the patch applied (they are not in pristine
-#    relapse), so this catches a silently truncated or empty patch.
+#    bundled elfldr and kexp must be gone, the runtime offsets URL must
+#    be the pinned one, and kexp must run via KXP2 without binary patching.
 if ! grep -q 'const AUTOLOAD = new URLSearchParams' src/main.js \
     || ! grep -q 'const AUTOLOAD_BASE = "../payloads/";' src/main.js \
     || ! grep -q 'async function startAutoload' src/main.js \
@@ -90,23 +88,27 @@ if ! grep -q 'const AUTOLOAD = new URLSearchParams' src/main.js \
     || grep -qF 'fw_str}.js?v=' src/main.js \
     || ! grep -q 'const SHARED_BASE = "../shared/";' src/kexp.js \
     || ! grep -q 'const DEFAULT_ELFLDR = "elfldr-ps5.elf";' src/kexp.js \
+    || ! grep -q 'const DEFAULT_KEXP = "kexp-ps5.bin";' src/kexp.js \
+    || ! grep -q '0x4b585032' src/kexp.js \
+    || grep -q 'patchShellcode' src/kexp.js \
     || ! grep -q 'mapElf(DEFAULT_ELFLDR, p, chain, SHARED_BASE)' src/kexp.js \
+    || ! grep -q 'fetchBinary(DEFAULT_KEXP, SHARED_BASE)' src/kexp.js \
     || ! grep -q 'export async function loadAutoloadPayload' src/kexp.js \
     || ! grep -q 'export async function isElfldrListening' src/kexp.js \
     || grep -qF 'DEFAULT_ELFLDR = "elfldr-ps5-1360.elf"' src/kexp.js \
+    || grep -qF 'DEFAULT_KEXP = "kexp_2026_05_25.bin"' src/kexp.js \
     || grep -qF '../../shared/' src/kexp.js \
     || grep -qF '../../payloads/' src/main.js \
     || [ ! -f LICENSE ] \
     || [ -e serve.py ] \
-    || [ "$(find payloads -maxdepth 1 -type f | wc -l)" -ne 1 ] \
-    || ! ls payloads/kexp*.bin >/dev/null 2>&1; then
+    || [ -d payloads ]; then
     echo "Error: relapse patch verification FAILED — integration markers missing."
     echo "patches/relapse-autoload.patch is incomplete or out of date."
     echo "Regenerate it from a patched copy and re-run."
     exit 1
 fi
 echo "relapse: patch verification OK (early elfldr guard, ?autoload sender,"
-echo "         shared elfldr, query-less offsets URL, payloads pruned to kexp)."
+echo "         shared elfldr and kexp with KXP2 api-table, query-less offsets URL)."
 
 # 6. Parse-check the patched JS in the mode the browser will use it in. A
 #    `node --check foo.js` parses in CommonJS (sloppy) mode, but these are ES

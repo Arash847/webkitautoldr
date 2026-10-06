@@ -22,28 +22,44 @@ class PackagingTests(unittest.TestCase):
                                   "/app/index.html", "/app/test/__complete__")
         cached = manifest.split("CACHE:\n", 1)[1].split("\nNETWORK:", 1)[0].splitlines()
         # The armed iframe URLs must be cached verbatim: AppCache matches the
-        # query string, and relapse/umtx2 are the only chains left.
-        self.assertIn("/app/test/relapse/index.html?autoload=payload.elf", cached)
-        self.assertIn("/app/test/umtx2/index.html?autoload=payload.elf&v=1", cached)
+        # query string, and all three chains have to resolve offline.
+        for url in ["/app/test/relapse/index.html?autoload=payload.elf",
+                    "/app/test/umtx2/index.html?autoload=payload.elf&v=1",
+                    "/app/test/slopkit/slopkit/poops.html?go=1&auto=1&production=1"
+                    "&trigger=netcontrol&attempts=8&only=ps0_preflight,ps1_prepare,"
+                    "ps3_stage0,ps4_validate,ps5_stage1,ps6_stage2,ps8_stage3,"
+                    "ps9_stage4,ps10_stage5&log=debug&payload=1&autoload=payload.elf&v=final"]:
+            self.assertIn(url, cached, url)
         self.assertEqual(cached[-2:], ["/app/index.html", "/app/test/__complete__"])
         with tempfile.TemporaryDirectory() as overrides:
             archive, _ = build_zip(str(frontend), overrides, "test", "test")
         with zipfile.ZipFile(io.BytesIO(archive)) as z:
             names = set(z.namelist())
             for rel in ["relapse/src/utils/rop_slave.js",
-                        "relapse/payloads/kexp_2026_05_25.bin",
                         *[f"relapse/offsets/{v}.js" for v in
                           ("7.00", "12.60", "13.00", "13.40", "13.60")]]:
                 self.assertIn("/app/test/" + rel, cached)
                 self.assertEqual(z.read(rel), (frontend / rel).read_bytes())
-            # relapse boots the shared elfldr (frontend/autoloader/shared/),
-            # and the optional jailbreak menu is never sent by the autoloader.
+            # The optional jailbreak menu is never sent by the autoloader, and
+            # the old per-chain kexp is gone (shared/kexp-ps5.bin is downloaded).
             for rel in ["relapse/payloads/etaHEN.elf", "relapse/payloads/kstuff.elf",
-                        "relapse/payloads/shadowmountplus.elf"]:
+                        "relapse/payloads/shadowmountplus.elf",
+                        "relapse/payloads/kexp_2026_05_25.bin"]:
                 self.assertNotIn(rel, names)
 
+    def test_chains_use_the_shared_loader_and_kexp(self):
+        """elfldr and kexp are downloaded into shared/, not vendored per chain."""
+        relapse = (ROOT / "frontend/autoloader/relapse/src/kexp.js").read_text(encoding="utf-8", errors="replace")
+        self.assertIn('const DEFAULT_KEXP = "kexp-ps5.bin"', relapse)
+        self.assertIn('const SHARED_BASE = "../shared/"', relapse)
+        download = (ROOT / "tools/download_deps.sh").read_text(encoding="utf-8", errors="replace")
+        self.assertIn("frontend/autoloader/shared/kexp-ps5.bin", download)
+        for path in ["relapse/payloads/kexp_2026_05_25.bin", "slopkit/slopkit/payloads/kexp"]:
+            self.assertFalse((ROOT / "frontend/autoloader" / path).exists(),
+                             path + " must not be vendored any more")
+
     def test_forced_mode(self):
-        for mode in ("relapse", "umtx2"):
+        for mode in ("relapse", "umtx2", "poops"):
             with patch.dict("os.environ", {"FORCE_EXPLOIT": mode}):
                 result = apply_exploit_mode_placeholder("/app/test/app.js",
                                                         b"[[EXPLOIT_MODE]]", "/app/test")

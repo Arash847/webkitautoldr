@@ -37,19 +37,23 @@ function setup() {
   const events = {};
   let tick = null;
   const context = {
-    document: { getElementById(id) { return elements[id] ||= trackedElement(); },
-      createElement: element, body: trackedElement() },
+    // app.js waits for DOMContentLoaded while the document is still parsing.
+    document: { readyState: 'loading',
+      getElementById(id) { return elements[id] ||= trackedElement(); },
+      createElement: element, body: trackedElement(),
+      addEventListener(name, fn) { events[name] = fn; } },
     navigator: { userAgent: 'Mozilla/5.0 (PlayStation 5/13.40) AppleWebKit/605.1' },
     window: { location: { search: '', origin: 'http://127.0.0.1:18181' },
       addEventListener(name, fn) { events[name] = fn; } },
     sessionStorage: { setItem() {}, removeItem() {} },
+    localStorage: { getItem() { return null; }, setItem() {} },
     setTimeout() {}, setInterval(fn) { tick = fn; return 1; }, clearInterval() {}, URLSearchParams,
   };
   const iframe = elements.exploit || (elements.exploit = trackedElement());
   iframe.contentDocument = iframeDoc;
   iframe.contentWindow = { location: { href: 'http://127.0.0.1:18181/app/v/relapse/index.html?autoload=payload.elf' } };
   vm.runInNewContext(app, context);
-  events.load();
+  events.DOMContentLoaded();
   return {
     lines, events, iframe, elements,
     push(text, cls = 'LOG-LOG') { lines.push({ textContent: text, className: cls }); tick(); },

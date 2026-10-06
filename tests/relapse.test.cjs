@@ -16,40 +16,69 @@ function element() {
 }
 
 /* Run app.js as the page would, and return the pieces a test needs. */
-function route(fw, force = '') {
+function route(fw, force = '', stored = null) {
   const elements = {};
   const events = {};
+  const store = {};
   const context = {
-    document: { getElementById(id) { return elements[id] ||= element(); }, createElement: element, body: element() },
+    // app.js waits for DOMContentLoaded while the document is still parsing,
+    // which is the state the page is in when the script tag is reached.
+    document: { readyState: 'loading',
+      getElementById(id) { return elements[id] ||= element(); },
+      createElement: element, body: element(),
+      addEventListener(name, fn) { events[name] = fn; } },
     navigator: { userAgent: fw ? 'PlayStation 5/' + fw : 'Desktop' },
     window: { location: { search: force, origin: 'http://localhost' },
       addEventListener(name, fn) { events[name] = fn; } },
     sessionStorage: { setItem() {}, removeItem() {} },
+    localStorage: { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } },
     setTimeout() {}, setInterval() { return 1; }, clearInterval() {}, URLSearchParams,
   };
+  if (stored) store.wkal_exploit = stored;
   vm.runInNewContext(app, context);
-  events.load();
+  events.DOMContentLoaded();
   return { elements, events, context };
 }
 
 /* --- firmware routing -------------------------------------------------- */
 
-// Relapse is the only 7.00+ route; poops/p2jb were dropped upstream in v0.5.0.
+// Relapse is the default for everything it has offsets for; poops is the
+// fallback Relapse has no offsets for (9.05, 11.40).
 for (const fw of ['7.00', '9.00', '12.00', '12.60', '12.70', '13.00', '13.40', '13.60']) {
   assert.equal(route(fw).elements.exploit.src, 'relapse/index.html?autoload=payload.elf', fw);
   assert.ok(fs.existsSync(path.join(root, 'frontend/autoloader/relapse/offsets', fw + '.js')), 'offsets for ' + fw);
 }
-// 9.05/11.40 have no relapse offsets, and the slopkit fallbacks are gone.
-for (const fw of ['9.05', '11.40', '13.50', '13.61', '14.00', '6.00', null])
+for (const fw of ['9.05', '11.40']) {
+  assert.match(route(fw).elements.exploit.src, /^slopkit\/slopkit\/poops/, 'no relapse offsets for ' + fw);
+  assert.ok(fs.existsSync(path.join(root, 'frontend/autoloader/slopkit/offsets', fw + '.js')), 'offsets for ' + fw);
+}
+for (const fw of ['13.61', '14.00', '6.00', null])
   assert.equal(route(fw).elements.exploit.src, 'about:blank', 'unsupported: ' + fw);
+
+// Firmwares inside 7.00-13.60 that the ranges match but have no offsets file
+// (betas, skipped versions) are routed to relapse and refused by the chain's
+// own guard rather than by the router. That is deliberate upstream behaviour:
+// the ranges mean a new firmware needs no table bump, so the guards are what
+// has to stay honest — hence the two assertions below.
+assert.match(route('13.50').elements.exploit.src, /^relapse\//);
+const firmwareGuard = read('frontend/autoloader/relapse/src/firmware.js');
+assert.match(firmwareGuard, /"13\.60"/, 'relapse must list its newest offsets version');
+assert.match(firmwareGuard, /is not supported/, 'relapse must refuse unknown firmwares itself');
+const slopkitGuard = read('frontend/autoloader/slopkit/slopkit/main.js');
+assert.match(slopkitGuard, /supportedFirmwares/, 'poops must refuse unknown firmwares itself');
 assert.match(route('5.50').elements.exploit.src, /^umtx2\//);
 assert.match(route('1.00').elements.exploit.src, /^umtx2\//);
+
+// 7.00-12.00 supports both chains: the installer page's choice wins, and
+// relapse is the default when there is none.
+for (const [stored, expected] of [[null, /^relapse\//], ['relapse', /^relapse\//], ['poops', /^slopkit\//]]) {
+  assert.match(route('12.00', '', stored).elements.exploit.src, expected, 'stored=' + stored);
+}
+// ?force= overrides the table, but can no longer reach the removed p2jb.
 assert.match(route('13.40', '?force=relapse').elements.exploit.src, /^relapse\//);
 assert.match(route('12.00', '?force=umtx2').elements.exploit.src, /^umtx2\//);
-// ?force= must not resurrect a removed chain: it is ignored and the firmware
-// table decides.
+assert.match(route('9.05', '?force=poops').elements.exploit.src, /^slopkit\//);
 assert.match(route('12.00', '?force=p2jb').elements.exploit.src, /^relapse\//);
-assert.match(route('9.05', '?force=poops').elements.exploit.src, /^about:blank$/);
 
 // --- message isolation --------------------------------------------------
 
