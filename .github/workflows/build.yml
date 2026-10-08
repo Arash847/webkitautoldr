@@ -1,0 +1,61 @@
+name: Build ELF
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master, dev]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Full history so tools/gen_version.py can see the release tags, and
+          # the submodules: the standalone builder, the installer sources and
+          # the icon renderer all live in third_party/.
+          fetch-depth: 0
+          submodules: true
+
+      - name: Strip CRLF line endings from shell scripts
+        run: |
+          # A Windows checkout can commit CRLF, which breaks the shebang lines.
+          find tools -name "*.sh" -exec sed -i 's/\r$//' {} +
+
+      - name: Test payloads, installer and selection flow
+        run: make test
+
+      - name: Build the PS5 SDK image
+        run: |
+          # clang/lld 18, the ps5-payload-dev SDK, the static libmicrohttpd and
+          # rsvg-convert for assets/icon.svg. Cached by Docker between steps.
+          docker build -t ps5-webkit-autoloader-sdk \
+            -f third_party/ps5-webkit-remote-loader/Dockerfile.sdk \
+            third_party/ps5-webkit-remote-loader
+
+      - name: Build ELF
+        run: |
+          # Runs as the runner user so build/ stays owned by it. Inside:
+          # make page (elfldr + autoload download, one page per chain),
+          # make registry, make icons, then prospero-clang + prospero-strip.
+          docker run --rm -u "$(id -u):$(id -g)" \
+            -v "$(pwd)":/src -w /src ps5-webkit-autoloader-sdk make clean all
+
+      - name: Rename ELF with version
+        run: |
+          VERSION=$(python3 tools/gen_version.py --print)
+          if [ -f "installer.elf" ]; then
+            mv installer.elf "webkit-autoloader-installer_v${VERSION}.elf"
+            echo "Created: webkit-autoloader-installer_v${VERSION}.elf"
+          else
+            echo "Error: installer.elf not found after build!"
+            exit 1
+          fi
+
+      - name: Upload ELF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-autoloader-installer
+          path: webkit-autoloader-installer_v*.elf
+          retention-days: 30
