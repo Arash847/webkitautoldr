@@ -1,393 +1,150 @@
+// Presentation only: runs through the standalone builder's awaited --js hook.
+// Keep the actual console, payloads and exploit in this document.
+//
+// This fork ships the compact UI: the progress pill is the whole status
+// surface, so the console stays hidden (style.css) and there is no log
+// terminal. Everything worth seeing arrives through update().
 (function () {
   'use strict';
+  var output = document.getElementById('console');
+  if (!output || document.getElementById('loader')) return;
 
-  var splashEl = document.getElementById('splash');
-  var loaderEl = document.getElementById('loader');
-  var progressContainer = document.getElementById('progressContainer');
-  var progressBar = document.getElementById('progressBar');
-  var progressLabel = document.getElementById('progressLabel');
-  var exploitEl = document.getElementById('exploit');
+  var NAME = 'PS Torghabeh WebkitAutoldr';
+  var config = window.WKAL_PAGE || {};
+  var version = config.version ? ' v' + config.version : '';
+  document.title = NAME + version;
 
-  /* After a WebProcess crash the PS5 browser restores this page together with
-     the iframe at its last URL — the armed exploit URL, which would auto-run
-     the chain again. Blank it as early as possible (the iframe element is
-     already in the DOM at script parse) so the chain only runs after the
-     splash screen. */
-  try {
-    exploitEl.src = 'about:blank';
-  } catch (e) { }
+  function element(tag, id, parent, text) {
+    var node = document.createElement(tag);
+    node.id = id;
+    if (text) node.textContent = text;
+    parent.appendChild(node);
+    return node;
+  }
 
+  /* Splash screen: brand mark plus name, fading out once the chain reports
+     its first milestone (or after a short fallback, so a silent chain never
+     leaves the user staring at the splash). */
+  var splash = document.createElement('div');
+  splash.id = 'splash';
+  splash.setAttribute('aria-hidden', 'false');
+  splash.innerHTML =
+    '<svg class="logo" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" ' +
+    'role="img" aria-label="' + NAME + '">' +
+    '<defs><linearGradient id="wkalMark" x1="0" y1="0" x2="1" y2="1">' +
+    '<stop offset="0%" stop-color="#1d4ed8"/>' +
+    '<stop offset="45%" stop-color="#2563eb"/>' +
+    '<stop offset="100%" stop-color="#38bdf8"/>' +
+    '</linearGradient></defs>' +
+    '<circle cx="64" cy="64" r="52" fill="none" stroke="url(#wkalMark)" ' +
+    'stroke-width="5" opacity="0.85"/>' +
+    '<circle cx="64" cy="64" r="39" fill="none" stroke="rgba(56,189,248,0.3)" ' +
+    'stroke-width="2"/>' +
+    '<path d="M72 30 L46 71 h14 l-6 27 26-42 h-15 z" fill="url(#wkalMark)"/>' +
+    '</svg><h1>' + NAME + '</h1>';
+  document.body.appendChild(splash);
+
+  var splashGone = false;
+  var splashTimer = 0;
+  function dismissSplash() {
+    if (splashGone) return;
+    splashGone = true;
+    if (splashTimer) clearTimeout(splashTimer);
+    splash.className = 'hide';
+    splash.setAttribute('aria-hidden', 'true');
+  }
+  splashTimer = setTimeout(dismissSplash, 2500);
+
+  var loader = element('main', 'loader', document.body);
+  var wrapper = element('div', 'logWrapper', loader);
+  wrapper.appendChild(output);
+  var progress = element('div', 'progressContainer', loader);
+  progress.setAttribute('role', 'progressbar');
+  progress.setAttribute('aria-valuemin', '0');
+  progress.setAttribute('aria-valuemax', '100');
+  var bar = element('div', 'progressBar', progress);
+  var label = element('div', 'progressLabel', progress);
+  element('div', 'brand', loader, NAME + version +
+    (config.buildTime ? ' (built ' + config.buildTime + ')' : ''));
+
+  var percent = 0;
   var finished = false;
-  var chainStarted = false;
-  var lastFrameUrl = '';
-  var mirrorTimer = 0;
-
-  /* Build-time exploit override: "auto" (firmware table), "umtx2" (FW
-     1.00-5.50) or "relapse" (FW 7.00-13.60). Replaced by
-     tools/gen_file_registry.py / build_host.py / dev_server.py from the
-     FORCE_EXPLOIT env (default "auto"); left as the raw placeholder when
-     served straight from source -> auto. A ?force= query on this page
-     overrides it at runtime (handy for make dev). */
-  var EXPLOIT_MODE = '[[EXPLOIT_MODE]]';
-  if (EXPLOIT_MODE.indexOf('[[') === 0) EXPLOIT_MODE = 'auto';
-
-  /* Firmware support definitions:
-     - <= 5.50: umtx2
-     - 7.00 - 13.60 (except 9.05, 11.40): relapse
-     This fork does not ship poops/slopkit: upstream re-added it in v0.5.2 and
-     its autoloader patch would not apply to a pristine checkout. 9.05 and
-     11.40 therefore have no chain here and are reported as unsupported. */
-  function isUmtx2Supported(num) {
-    var n = typeof num === 'number' ? num : parseFloat(num);
-    return n > 0 && n <= 5.50;
-  }
-
-  function isRelapseSupported(num, str) {
-    var n = typeof num === 'number' ? num : parseFloat(num);
-    var s = str || (typeof num === 'string' ? num : '');
-    var isExcluded = (s === '9.05' || s === '11.40' ||
-                      Math.abs(n - 9.05) < 0.001 || Math.abs(n - 11.40) < 0.001);
-    return n >= 7.00 && n <= 13.60 && !isExcluded;
-  }
-
-  var UMTX2_URL =
-    'umtx2/index.html?autoload=payload.elf&v=1';
-  /* Keep in sync with relapse_iframe_url in tools/gen_file_registry.py — the
-     AppCache manifest lists these exact URLs so the console can serve them
-     offline (AppCache matches URLs including the query string). Both chains
-     auto-run on load; only umtx2 needs the sessionStorage key set below. */
-  var RELAPSE_URL =
-    'relapse/index.html?autoload=payload.elf';
-
-  var exploitMode = null;
-  var progressPercent = 0;
-
-  /* This build ships the compact UI: no log terminal, no footer. The progress
-     bar and its label are the whole status surface, so uiLog() is a no-op —
-     everything that used to go to the log reaches the user through
-     setProgressLabel() / advance*Progress() / markProgressFailed() below. The
-     export is kept because the exploit pages expect it to exist. */
-  function uiLog(message, type, deferScroll) {
-    return null;
-  }
-
-  function updateProgress(percent, message) {
-    progressPercent = percent;
+  var sent = false;
+  function update(next, message, state) {
+    percent = Math.max(percent, next);
     /* The bar is a full-width pill scaled on the x axis (see style.css), not a
        sized element — so it can never reflow the label sitting on top of it. */
-    progressBar.style.transform = 'scaleX(' + percent / 100 + ')';
-    if (message) {
-      progressLabel.textContent = message;
-    }
+    bar.style.transform = 'scaleX(' + (percent / 100) + ')';
+    bar.style.webkitTransform = 'scaleX(' + (percent / 100) + ')';
+    label.textContent = message;
+    progress.setAttribute('aria-valuenow', String(percent));
+    progress.setAttribute('aria-valuetext', message);
+    progress.setAttribute('data-state', state || 'running');
+    /* Failure tint: without a log view an error would be gone by the next
+       tick, and a chain that dies mid-stage just looks stalled. */
+    if (state === 'error') progress.className = 'bad';
+    if (percent > 10) dismissSplash();
   }
+  update(0, 'Starting WebKit exploit...');
 
-  window.uiLog = uiLog;
-  window.updateProgress = updateProgress;
-
-  function detectFirmware() {
-    var m = /PlayStation 5\/(\d+\.\d+)/.exec(navigator.userAgent);
-    if (!m) return null;
-    return { str: m[1], num: parseFloat(m[1]) };
-  }
-
-  /* Choose which exploit to arm. Forced modes (build-time EXPLOIT_MODE or a
-     ?force= query on this page) bypass the firmware table so a specific chain
-     can be exercised on any firmware — the exploit page's own firmware guard
-     still applies. Returns 'umtx2' | 'relapse' | null. */
-  function pickExploit() {
-    var fw = detectFirmware();
-    var forced = null;
-    try {
-      var q = new URLSearchParams(window.location.search).get('force');
-      if (q === 'umtx2' || q === 'relapse') forced = q;
-    } catch (e) { }
-    if (forced) {
-      uiLog('[force] using ' + forced + ' on firmware ' + (fw ? fw.str : 'unknown'), 'warning');
-      return forced;
+  function readLine(line) {
+    var text = line.textContent || '';
+    var error = /(?:^|\s)log-(?:error|minus)(?:\s|$)/.test(line.className);
+    var summary = /queue finished: \d+\/\d+ completed, (\d+) failed/.exec(text);
+    if (summary) {
+      finished = true;
+      if (Number(summary[1]) !== 0) update(percent, 'Autoload failed.', 'error');
+      else update(100, sent ? 'Autoload finished.' : 'Payloads finished.', 'done');
+      return;
     }
-    if (EXPLOIT_MODE === 'umtx2' || EXPLOIT_MODE === 'relapse') {
-      uiLog('[force] using ' + EXPLOIT_MODE + ' on firmware ' + (fw ? fw.str : 'unknown'), 'warning');
-      return EXPLOIT_MODE;
+    if (/queue stopped:/.test(text)) {
+      finished = true;
+      if (error) update(percent, 'Stopped.', 'error');
+      else if (/ELF loader is already accepting connections/.test(text))
+        update(100, 'ELF loader already running. Nothing to do.', 'done');
+      else update(percent, 'Stopped.', 'stopped');
+      return;
     }
-    if (!fw) {
-      uiLog('[ERROR] Not a PlayStation 5 browser.', 'error');
-      return null;
+    if (error) {
+      update(percent, 'An error occurred.', 'error');
+      return;
     }
-    if (isUmtx2Supported(fw.num)) return 'umtx2';
-    if (isRelapseSupported(fw.num, fw.str)) return 'relapse';
-    uiLog('[ERROR] Unsupported firmware ' + fw.str +
-      ' (supported: 1.00-5.50 via umtx2, 7.00-13.60 via relapse).', 'error');
-    return null;
-  }
-
-  function revealExploit() {
-    splashEl.classList.add('hide');
-    setTimeout(function () {
-      splashEl.hidden = true;
-      loaderEl.hidden = false;
-    }, 480);
-  }
-
-  function onAutoloadResult(data) {
     if (finished) return;
-    mirrorConsole(exploitMode);
-    finished = true;
-
-    /* Success is terminal — stop mirroring so the page stays idle while the
-       payload runs alongside it. On failure keep mirroring so the label holds
-       the last state the chain reached. */
-    if (data.ok && mirrorTimer) {
-      clearInterval(mirrorTimer);
-      mirrorTimer = 0;
-    }
-    if (data.ok) {
-      markProgressFailed(false);
-      uiLog('Payload loaded (' + data.bytes + ' bytes sent to elfldr).', 'success');
-      updateProgress(100, 'Autoload finished.');
-
-      /* Payload is running as its own process now — unload the iframe to
-         free the memory it held and avoid a browser OOM dialog.
-         NOTE: only safe for umtx2. relapse's document has to stay open: its
-         ROP worker is still parked on a hijacked return slot, and tearing the
-         document down would unwind that thread. */
-      if (exploitMode === 'umtx2') {
-        try { exploitEl.src = 'about:blank'; } catch (e) { }
-      }
-    } else {
-      markProgressFailed(true);
-      uiLog('[ERROR] Autoload failed: ' + (data.why || 'unknown error'), 'error');
-      updateProgress(0, 'Autoload failed.');
-    }
-    setTimeout(function () {
-      if (data.ok) {
-        uiLog('Payload running on the console.', 'success');
-      }
-    }, 1500);
-  }
-
-  /* Mirror a chain's live #console log (#console > div) from the same-origin
-     exploit iframe, so the UI shows what the chain is doing instead of a
-     generic progress message.
-
-     Both fast chains append to #console, so one mirror covers them. umtx2 marks
-     severity with a class (LOG-ERROR / LOG-WARN / LOG-SUCCESS) and relapse
-     with a text prefix ([+] info/success, [-] error, [*] log). Both also
-     rewrite their last line in place for progress messages (umtx2's
-     "Race attempt N-M"), so we re-read the last line after the loop. */
-  var consoleMirror = { lines: 0, lastText: '' };
-
-  function consoleSeverity(text, cls) {
-    if (/LOG-ERROR/.test(cls) || /^\[-\]/.test(text)) return 'error';
-    if (/LOG-WARN/.test(cls)) return 'warning';
-    if (/LOG-SUCCESS/.test(cls) || /^\[\+\]/.test(text)) return 'success';
-    return 'info';
-  }
-
-  /* Strip the exploit's "[*] " / "[+] " marker and clip to one line, so the
-     slim progress label stays readable. Change-guarded — the mirror repaints
-     on a timer and most ticks bring nothing new. */
-  var lastLabel = '';
-  function setProgressLabel(text) {
-    var label = text.replace(/^\[[*+\-]\]\s*/, '').replace(/\s+/g, ' ');
-    if (label.length > 68) label = label.slice(0, 65) + '...';
-    if (label && label !== lastLabel) {
-      lastLabel = label;
-      progressLabel.textContent = label;
+    if (/Autoload: sent \d+ bytes/.test(text)) {
+      sent = true;
+      update(98, 'Finishing autoload...');
+    } else if (/\[3\/3\].*autoload\.js/.test(text)) update(95, 'Loading autoload payload...');
+    else if (/payloads loaded|elfldr.*listening/i.test(text)) update(90, 'ELF loader ready...');
+    else if (/privileges ready/i.test(text)) update(80, 'Privileges ready...');
+    else if (/read and write ready/i.test(text)) update(65, 'Kernel read/write ready...');
+    else if (/Starting kernel exploit|\[2\/3\]/i.test(text)) update(40, 'Starting kernel exploit...');
+    else if (/\[1\/3\].*elfldr-check\.js/.test(text)) update(35, 'Checking ELF loader...');
+    else if (/Worker chain: ready/i.test(text)) update(30, 'WebKit ready...');
+    else if (/ARW ready/i.test(text)) update(20, 'Preparing WebKit...');
+    else if (/Starting WebKit exploit/i.test(text)) update(10, 'Starting WebKit exploit...');
+    else {
+      var stage = /\bSTAGE\s*([0-5])\b/i.exec(text);
+      if (stage) update(40 + Number(stage[1]) * 10, 'Running kernel exploit...');
     }
   }
 
-  /* Failures the user can actually do something about. Relapse's KASLR leak
-     needs a network interface that holds an IPv4 address: with no lease (or
-     no link at all) every address is 0.0.0.0 and the stage throws
-     "kaslr: no interface has an address", which tells a user nothing. Internet
-     access is NOT required — any interface with an address is enough, so a LAN
-     lease or a static IP in the console's network settings both work. */
-  var ERROR_HINTS = [
-    { re: /no interface has an address/, label: 'Kernel: no interface address — connect a network, then reload' },
-    { re: /routing socket|no routing reply/, label: 'Kernel: routing socket unavailable — connect a network, then reload' },
-    { re: /Worker failed to load|never answered/, label: 'Chain stalled — reload the page to retry' }
-  ];
-
-  function hintFor(text) {
-    for (var i = 0; i < ERROR_HINTS.length; i++) {
-      if (ERROR_HINTS[i].re.test(text)) return ERROR_HINTS[i].label;
+  // Observe the native log instead of replacing writeLog or the module APIs.
+  // Process only changed lines, including in-place stage updates.
+  var observer = new MutationObserver(function (records) {
+    var changed = [];
+    function remember(node) {
+      if (node.nodeType !== 1) node = node.parentNode;
+      while (node && node.parentNode !== output) node = node.parentNode;
+      if (node && changed.indexOf(node) < 0) changed.push(node);
     }
-    return null;
-  }
-
-  /* Relapse reports stages rather than a numerical percent. Advance the bar
-     only when a known stage has completed; never move it backwards mid-run. */
-  function advanceRelapseProgress(text) {
-    var percent = 0;
-    if (/Starting WebKit exploit/.test(text)) percent = 10;
-    else if (/ARW ready/.test(text)) percent = 20;
-    else if (/Worker chain: ready/.test(text)) percent = 35;
-    else if (/Kernel: Starting kernel exploit/.test(text)) percent = 45;
-    else if (/Kernel: read and write ready/.test(text)) percent = 60;
-    else if (/Kernel: privileges ready/.test(text)) percent = 75;
-    else if (/Kernel: payloads loaded|elfldr is listening/.test(text)) percent = 85;
-    else if (/elfldr is up, sending/.test(text)) percent = 95;
-    if (percent > progressPercent) updateProgress(percent);
-  }
-
-  /* Without a log view an error line would otherwise be gone by the next tick,
-     and a chain that dies mid-stage just looks stalled. Tint the whole pill red
-     on the first error and keep it there until the run recovers, so "this
-     attempt failed" stays visible next to the progress it made. */
-  function markProgressFailed(failed) {
-    if (failed) {
-      progressContainer.classList.add('bad');
-    } else {
-      progressContainer.classList.remove('bad');
-    }
-  }
-
-  function mirrorConsole(prefix) {
-    var doc;
-    try {
-      doc = exploitEl.contentDocument;
-    } catch (e) {
-      return;
-    }
-    if (!doc) return;
-
-    /* Detect iframe navigation/reload: reset the mirror so a fresh document
-       streams its log from the top. */
-    var frameUrl = '';
-    try {
-      frameUrl = exploitEl.contentWindow.location.href;
-    } catch (e) { }
-    if (frameUrl !== lastFrameUrl) {
-      lastFrameUrl = frameUrl;
-      consoleMirror = { lines: 0, lastText: '' };
-    }
-    /* The iframe is intentionally empty until the chain is armed — nothing
-       to mirror yet. */
-    if (!chainStarted) return;
-
-    var lines = doc.querySelectorAll('#console > div');
-    if (lines.length === 0) {
-      /* #console is created by the exploit page's own script, so it is absent
-         while the document parses, and on any page that is not the exploit
-         (a 404, an AppCache fallback, or a crash). Warn once per document
-         once it has finished loading. Never re-arm from here: the chains
-         start the moment they load, so a second load would race the first
-         rather than recover from it — the user reloads instead. */
-      if (doc.readyState === 'complete' && mirrorConsole.warned !== frameUrl) {
-        mirrorConsole.warned = frameUrl;
-        setProgressLabel('[iframe] no exploit log at "' + (frameUrl || 'about:blank')
-          + '" — the chain may not have started. Reload the page to retry.');
-        markProgressFailed(true);
-      }
-      return;
-    }
-
-    /* If the log shrank (the exploit caps it, or a fresh document replaced
-       it), re-anchor the counter WITHOUT re-logging — those lines were
-       already streamed, and re-streaming them would double the status. */
-    if (lines.length < consoleMirror.lines) {
-      consoleMirror.lines = lines.length;
-    }
-    for (; consoleMirror.lines < lines.length; consoleMirror.lines++) {
-      showConsoleLine(prefix, lines[consoleMirror.lines]);
-    }
-
-    /* A rewrite of the last line never reaches the loop above, so re-read it. */
-    if (lines.length > 0) {
-      var last = lines[lines.length - 1];
-      var lastText = (last.textContent || '').trim();
-      if (lastText && lastText !== consoleMirror.lastText) {
-        showConsoleLine(prefix, last);
-      }
-    }
-  }
-
-  /* One mirrored #console line -> the label, the bar and the failure tint.
-     Centralised because a line arrives either as a new element or as a
-     rewrite of the last one. */
-  function showConsoleLine(prefix, el) {
-    var text = (el.textContent || '').trim();
-    if (!text) return;
-    var severity = consoleSeverity(text, el.className || '');
-    consoleMirror.lastText = text;
-    uiLog('[' + prefix + '] ' + text, severity);
-    if (severity === 'error') {
-      markProgressFailed(true);
-      /* An ordinary error keeps the last progress text in the label — where
-         the run got to is still the useful thing. An error we can explain
-         replaces it: the run is over, and the remedy is what matters now. */
-      var hint = hintFor(text);
-      if (hint) setProgressLabel(hint);
-    } else {
-      if (prefix === 'relapse') advanceRelapseProgress(text);
-      if (severity === 'info' || severity === 'success') {
-        /* Neither chain has a separate stage/progress element, so surface the
-           newest non-error line as the progress label — that is the only
-           "what is it doing right now" signal the exploit gives us. */
-        setProgressLabel(text);
-      }
-    }
-  }
-
-
-  function start() {
-    uiLog('WebKit Autoloader by PLK', 'success');
-    updateProgress(0, 'Waiting to start...');
-
-    window.addEventListener('message', function (event) {
-      var data = event.data;
-      if (event.source !== exploitEl.contentWindow || !data || data.type !== 'wkal') return;
-      if (data.kind === 'log' && exploitMode === 'relapse') {
-        mirrorConsole(exploitMode);
-        return;
-      }
-      if (data.kind === 'autoload') {
-        onAutoloadResult(data);
-      }
+    records.forEach(function (record) {
+      if (record.target === output) {
+        for (var i = 0; i < record.addedNodes.length; i++) remember(record.addedNodes[i]);
+      } else remember(record.target);
     });
-
-    /* No iframe 'load' listener: it used to reset the mirror counters, which
-       re-streamed the whole log mid-run. The URL-diff branch in
-       mirrorConsole() and the shrink re-anchor already cover a fresh
-       document (its #console starts empty, so its lines stream normally). */
-
-    var picked = pickExploit();
-    if (!picked) {
-      updateProgress(0, 'Unsupported firmware.');
-      return;
-    }
-    exploitMode = picked;
-    var exploitUrl = picked === 'umtx2' ? UMTX2_URL : RELAPSE_URL;
-    updateProgress(5);
-
-    /* Relapse also requests a mirror update on each log write, so short
-       successful runs are captured; the timer is the fallback. */
-    mirrorTimer = setInterval(function () { mirrorConsole(exploitMode); }, 500);
-
-    /* umtx2 auto-runs its chain on load when sessionStorage 'on_load_autorun'
-       is set (it clears it itself once main() starts); clear it on the relapse
-       path so a stale key never re-triggers it. */
-    try {
-      if (picked === 'umtx2') {
-        sessionStorage.setItem('on_load_autorun', 'kernel');
-        sessionStorage.setItem('wkal_autoload', 'payload.elf');
-      } else {
-        sessionStorage.removeItem('on_load_autorun');
-        sessionStorage.removeItem('wkal_autoload');
-      }
-    } catch (e) { }
-
-    chainStarted = true;
-    try {
-      exploitEl.src = exploitUrl;
-    } catch (e) { }
-
-    setTimeout(revealExploit, 1500);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start);
-  } else {
-    start();
-  }
-})();
+    changed.forEach(readLine);
+    while (output.children.length > 80) output.removeChild(output.firstElementChild);
+    wrapper.scrollTop = wrapper.scrollHeight;
+  });
+  observer.observe(output, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class'] });
+}());
