@@ -30,9 +30,14 @@ jobs:
         run: |
           # clang/lld 18, the ps5-payload-dev SDK, the static libmicrohttpd and
           # rsvg-convert for assets/icon.svg. Cached by Docker between steps.
-          docker build -t ps5-webkit-autoloader-sdk \
-            -f third_party/ps5-webkit-remote-loader/Dockerfile.sdk \
-            third_party/ps5-webkit-remote-loader
+          #
+          # The recipe fetches libmicrohttpd from ftp.gnu.org, which GitHub's
+          # runners cannot reach (Azure egress to the GNU FTP mirrors times
+          # out). Build from a copy with that one host moved to a public
+          # mirror, so the pinned submodule stays untouched.
+          cp -r third_party/ps5-webkit-remote-loader /tmp/sdk-image
+          sed -i 's#ftp\.gnu\.org#mirrors.kernel.org#' /tmp/sdk-image/build_deps.sh
+          docker build -t ps5-webkit-autoloader-sdk -f /tmp/sdk-image/Dockerfile.sdk /tmp/sdk-image
 
       - name: Build ELF
         run: |
