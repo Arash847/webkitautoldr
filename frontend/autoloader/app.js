@@ -38,18 +38,23 @@
   }
 
   /* Splash screen: logo and name, fading out on the first milestone (or after
-     a short fallback, so a silent chain never leaves the user on the splash). */
+     a short fallback, so a silent chain never leaves the user on the splash).
+     The logo and name sit in #splashStack, which the stylesheet centres by
+     translation — see the note there about why flexbox alone was not enough. */
   var splash = document.createElement('div');
   splash.id = 'splash';
   splash.setAttribute('aria-hidden', 'false');
+  var stack = document.createElement('div');
+  stack.id = 'splashStack';
   var logo = document.createElement('img');
   logo.className = 'logo';
   logo.src = LOGO;
   logo.alt = NAME;
-  splash.appendChild(logo);
+  stack.appendChild(logo);
   var title = document.createElement('h1');
   title.textContent = NAME;
-  splash.appendChild(title);
+  stack.appendChild(title);
+  splash.appendChild(stack);
   document.body.appendChild(splash);
 
   var splashGone = false;
@@ -72,8 +77,7 @@
   progress.setAttribute('aria-valuemax', '100');
   var bar = element('div', 'progressBar', progress);
   var label = element('div', 'progressLabel', progress);
-  element('div', 'brand', loader, NAME + version +
-    (config.buildTime ? ' (built ' + config.buildTime + ')' : ''));
+  element('div', 'brand', loader, NAME);
 
   var percent = 0;
   var finished = false;
@@ -90,6 +94,17 @@
     sweepTimer = setTimeout(function () { bar.className = ''; }, 1100);
   }
 
+  /* The failure tint describes the current state, it does not latch. The page
+     scripts log error-typed lines for things that can happen inside a normal
+     run — a probe reporting nothing listening yet, a payload reporting what
+     it could not do before it recovered — and a run that then reaches 100%
+     should not stay red for the rest of the process. Progress advancing is
+     the signal that whatever it was, it did not stop the chain; only a
+     terminal error keeps the tint. */
+  function setFailed(on) {
+    progress.className = on ? 'bad' : '';
+  }
+
   function update(next, message, state) {
     var grown = next > percent;
     percent = Math.max(percent, next);
@@ -101,9 +116,8 @@
     progress.setAttribute('aria-valuenow', String(percent));
     progress.setAttribute('aria-valuetext', message);
     progress.setAttribute('data-state', state || 'running');
-    /* Failure tint: without a log view an error would be gone by the next
-       tick, and a chain that dies mid-stage just looks stalled. */
-    if (state === 'error') progress.className = 'bad';
+    if (state === 'error') setFailed(true);
+    else if (state === 'done' || grown) setFailed(false);
     if (grown && percent < 100) sweep();
     if (percent > 10) dismissSplash();
   }
