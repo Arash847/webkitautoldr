@@ -26,6 +26,9 @@ jobs:
       - name: Test payloads, installer and selection flow
         run: make test
 
+      - name: Test the compact UI
+        run: node tests/ui_progress.test.cjs
+
       - name: Build the PS5 SDK image
         run: |
           # clang/lld 18, the ps5-payload-dev SDK, the static libmicrohttpd and

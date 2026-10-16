@@ -83,6 +83,28 @@
   var finished = false;
   var sent = false;
   var sweepTimer = 0;
+  var lastLineAt = 0;
+  var lastProgressAt = 0;
+  var lastError = '';
+
+  /* Silence watchdog.
+
+     A standalone page always closes with the queue's summary line, except when
+     run() itself throws — site.js catches that and writes one bare error line,
+     then the page goes completely quiet forever. 20s of total silence with no
+     progress is the only signal available for that, and it is deliberately
+     slow: a quiet-but-working chain just says so instead of turning red. */
+  var QUIET_MS = 20000;
+  var quietTimer = setInterval(function () {
+    if (finished) return;
+    var t = now();
+    if (t - lastLineAt < QUIET_MS) return;
+    if (t - lastProgressAt < QUIET_MS) return;
+    finished = true;
+    if (lastError) update(percent, lastError, 'error');
+    else update(percent, 'Still working...', 'stopped');
+  }, 1000);
+  lastLineAt = lastProgressAt = now();
 
   /* One pass of light across the bar per milestone, then it stops. Restarting
      the animation needs the class off, a reflow, and the class back on. */
@@ -94,15 +116,19 @@
     sweepTimer = setTimeout(function () { bar.className = ''; }, 1100);
   }
 
-  /* The failure tint describes the current state, it does not latch. The page
-     scripts log error-typed lines for things that can happen inside a normal
-     run — a probe reporting nothing listening yet, a payload reporting what
-     it could not do before it recovered — and a run that then reaches 100%
-     should not stay red for the rest of the process. Progress advancing is
-     the signal that whatever it was, it did not stop the chain; only a
-     terminal error keeps the tint. */
+  /* The failure tint describes the current state, it does not latch. */
   function setFailed(on) {
     progress.className = on ? 'bad' : '';
+  }
+
+  function now() {
+    return (window.performance && window.performance.now) ? window.performance.now() : Date.now();
+  }
+
+  /* One line, no marker, short enough for the pill. */
+  function brief(text) {
+    var t = String(text).replace(/\s+/g, ' ').replace(/^\[[-+*!]\]\s*/, '').trim();
+    return t.length > 96 ? t.slice(0, 95).replace(/\s+\S*$/, '') + '…' : t;
   }
 
   function update(next, message, state) {
@@ -116,6 +142,7 @@
     progress.setAttribute('aria-valuenow', String(percent));
     progress.setAttribute('aria-valuetext', message);
     progress.setAttribute('data-state', state || 'running');
+    if (grown) lastProgressAt = now();
     if (state === 'error') setFailed(true);
     else if (state === 'done' || grown) setFailed(false);
     if (grown && percent < 100) sweep();
@@ -123,26 +150,48 @@
   }
   update(0, 'Starting WebKit exploit...');
 
+  /* Why an error-typed line is not a failure signal here.
+
+     The page scripts log with the error type for "I could not do X" as well as
+     for real failures: a probe that finds nothing listening yet, a payload
+     reporting a socket it retried, and site.js's catch-all on any throw all
+     land in the console as error lines. Keying the pill on that class made it
+     shout "An error occurred" mid-run and then keep shouting, which is worse
+     than silence — with the log viewer off the user could not even find out
+     what it was complaining about.
+
+     So error-typed lines are captured as a possible reason and otherwise
+     ignored. The queue's own closing line is the authoritative verdict
+     ("N/M completed, K failed", "queue stopped"), and the watchdog below
+     covers the one case it cannot: the page dying before any closing line. */
   function readLine(line) {
     var text = line.textContent || '';
+    lastLineAt = now();
     var error = /(?:^|\s)log-(?:error|minus)(?:\s|$)/.test(line.className);
     var summary = /queue finished: \d+\/\d+ completed, (\d+) failed/.exec(text);
+    var stopped = /queue stopped:/.test(text);
+    /* Captured before the closing lines are handled, and skipped for them: the
+       summary is error-typed too when something failed, and it would otherwise
+       overwrite the reason it is reporting. */
+    if (error && text && !summary && !stopped) lastError = brief(text);
     if (summary) {
       finished = true;
-      if (Number(summary[1]) !== 0) update(percent, 'Autoload failed.', 'error');
-      else update(100, sent ? 'Autoload finished.' : 'Payloads finished.', 'done');
+      if (Number(summary[1]) !== 0) {
+        setFailed(true);
+        update(percent, lastError || 'Autoload failed.', 'error');
+      } else {
+        update(100, sent ? 'Autoload finished.' : 'Payloads finished.', 'done');
+      }
       return;
     }
-    if (/queue stopped:/.test(text)) {
+    if (stopped) {
       finished = true;
-      if (error) update(percent, 'Stopped.', 'error');
-      else if (/ELF loader is already accepting connections/.test(text))
+      if (error) {
+        setFailed(true);
+        update(percent, lastError || 'Stopped.', 'error');
+      } else if (/ELF loader is already accepting connections/.test(text))
         update(100, 'ELF loader already running. Nothing to do.', 'done');
       else update(percent, 'Stopped.', 'stopped');
-      return;
-    }
-    if (error) {
-      update(percent, 'An error occurred.', 'error');
       return;
     }
     if (finished) return;
