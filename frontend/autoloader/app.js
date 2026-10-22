@@ -5,40 +5,13 @@
 // surface, so the console stays hidden (style.css) and there is no log
 // terminal. Everything worth seeing arrives through update().
 //
-// Motion is event-driven: the bar grows and sweeps once per milestone, and the
-// finished state is painted once. Nothing loops forever, so the page stays
-// calm instead of shimmering for the minutes a chain can take.
+// Motion is event-driven: the bar grows and sweeps once per milestone, the
+// pill blooms once at 100%. Nothing loops forever, so the page stays calm
+// instead of shimmering for the minutes a chain can take.
 (function () {
   'use strict';
   var output = document.getElementById('console');
   if (!output || document.getElementById('loader')) return;
-
-  /* Upstream's writeLog scrolls the console after every single line:
-     output.scrollTop = output.scrollHeight, then
-     window.scrollTo(0, document.body.scrollHeight). WebKit flushes layout
-     synchronously for each of those reads and writes, so a chatty chain means
-     hundreds of full-document layout passes while the exploit is running —
-     the heaviest thing this page did, and pure waste here: the console is
-     display:none and body has overflow:hidden, so there is nothing to scroll.
-     Shadow all three properties, body's included (the argument is evaluated
-     even when scrollTo does nothing). If an engine refuses a redefinition,
-     upstream behaviour stays. */
-  try {
-    Object.defineProperty(output, 'scrollHeight', {
-      configurable: true,
-      get: function () { return 0; }
-    });
-    Object.defineProperty(output, 'scrollTop', {
-      configurable: true,
-      get: function () { return 0; },
-      set: function () {}
-    });
-    Object.defineProperty(document.body, 'scrollHeight', {
-      configurable: true,
-      get: function () { return 0; }
-    });
-    window.scrollTo = function () {};
-  } catch (e) { /* older engine: keep upstream's scrolling */ }
 
   var NAME = 'PS Torghabeh WebkitAutoldr';
   var config = window.WKAL_PAGE || {};
@@ -86,26 +59,12 @@
 
   var splashGone = false;
   var splashTimer = 0;
-
-  /* Once the fade is over the splash has no reason to exist, and leaving a
-     full-viewport fixed layer (plus a decoded logo) alive for the rest of the
-     run is weight the exploit does not need. Drop the image and the subtree so
-     the engine can reclaim both. */
-  function removeSplash() {
-    if (!splash || !splash.parentNode) return;
-    logo.removeAttribute('src');
-    splash.parentNode.removeChild(splash);
-    splash = null;
-    logo = null;
-  }
-
   function dismissSplash() {
     if (splashGone) return;
     splashGone = true;
     if (splashTimer) clearTimeout(splashTimer);
     splash.className = 'hide';
     splash.setAttribute('aria-hidden', 'true');
-    setTimeout(removeSplash, 700);
   }
   splashTimer = setTimeout(dismissSplash, 2500);
 
@@ -127,48 +86,23 @@
   var lastLineAt = 0;
   var lastProgressAt = 0;
   var lastError = '';
-  var lastErrorAt = 0;
 
   /* Silence watchdog.
 
      A standalone page always closes with the queue's summary line, except when
-     run() itself throws — site.js catches that, writes one bare error line, and
-     the page goes permanently silent, never reaching a summary. 20s of silence
-     covers exactly that case, and only that case: the last non-empty line must
-     itself be the error. If anything was said after the error, the chain is
-     alive and the honest message is "Still working..." in neutral grey, which
-     also leaves the observer running so a slow exploit can still report its
-     next milestone. */
+     run() itself throws — site.js catches that and writes one bare error line,
+     then the page goes completely quiet forever. 20s of total silence with no
+     progress is the only signal available for that, and it is deliberately
+     slow: a quiet-but-working chain just says so instead of turning red. */
   var QUIET_MS = 20000;
-  var quietTimer = 0;
-  var stalled = false;
-
-  /* After a verdict there is nothing left to learn and nothing left to
-     animate. Stop the observer and every timer so the page is completely idle
-     from that point on, and let the splash finish leaving the DOM. */
-  function settle() {
-    finished = true;
-    if (quietTimer) { clearInterval(quietTimer); quietTimer = 0; }
-    if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = 0; }
-    bar.className = '';
-    if (observer) observer.disconnect();
-    dismissSplash();
-  }
-
-  quietTimer = setInterval(function () {
+  var quietTimer = setInterval(function () {
     if (finished) return;
     var t = now();
-    if (t - lastLineAt < QUIET_MS || t - lastProgressAt < QUIET_MS) {
-      stalled = false;
-      return;
-    }
-    if (lastError && lastErrorAt === lastLineAt) {
-      settle();
-      update(percent, lastError, 'error');
-    } else if (!stalled) {
-      stalled = true;
-      update(percent, 'Still working...', 'stopped');
-    }
+    if (t - lastLineAt < QUIET_MS) return;
+    if (t - lastProgressAt < QUIET_MS) return;
+    finished = true;
+    if (lastError) update(percent, lastError, 'error');
+    else update(percent, 'Still working...', 'stopped');
   }, 1000);
   lastLineAt = lastProgressAt = now();
 
@@ -230,42 +164,18 @@
      ignored. The queue's own closing line is the authoritative verdict
      ("N/M completed, K failed", "queue stopped"), and the watchdog below
      covers the one case it cannot: the page dying before any closing line. */
-  /* Compiled once. These run on every line the chain writes, and the chain can
-     be chatty; a fresh RegExp object per test is needless garbage in the same
-     renderer the exploit is using. */
-  var RE_ERROR = /(?:^|\s)log-(?:error|minus)(?:\s|$)/;
-  var RE_SUMMARY = /queue finished: \d+\/\d+ completed, (\d+) failed/;
-  var RE_STOPPED = /queue stopped:/;
-  var RE_ALREADY = /ELF loader is already accepting connections/;
-  var RE_SENT = /Autoload: sent \d+ bytes/;
-  var RE_AUTOLOAD = /\[3\/3\].*autoload\.js/;
-  var RE_ELF_READY = /payloads loaded|elfldr.*listening/i;
-  var RE_PRIVS = /privileges ready/i;
-  var RE_RW = /read and write ready/i;
-  var RE_KERNEL = /Starting kernel exploit|\[2\/3\]/i;
-  var RE_ELFCHECK = /\[1\/3\].*elfldr-check\.js/;
-  var RE_WORKER = /Worker chain: ready/i;
-  var RE_ARW = /ARW ready/i;
-  var RE_WEBKIT = /Starting WebKit exploit/i;
-  var RE_STAGE = /\bSTAGE\s*([0-5])\b/i;
-
   function readLine(line) {
     var text = line.textContent || '';
-    /* Blank lines are not evidence of life: upstream writes one for an absent
-       field, and counting it would hide a page that died right after an error. */
-    if (/\S/.test(text)) lastLineAt = now();
-    var error = RE_ERROR.test(line.className);
-    var summary = RE_SUMMARY.exec(text);
-    var stopped = RE_STOPPED.test(text);
+    lastLineAt = now();
+    var error = /(?:^|\s)log-(?:error|minus)(?:\s|$)/.test(line.className);
+    var summary = /queue finished: \d+\/\d+ completed, (\d+) failed/.exec(text);
+    var stopped = /queue stopped:/.test(text);
     /* Captured before the closing lines are handled, and skipped for them: the
        summary is error-typed too when something failed, and it would otherwise
        overwrite the reason it is reporting. */
-    if (error && text && !summary && !stopped) {
-      lastError = brief(text);
-      lastErrorAt = lastLineAt;
-    }
+    if (error && text && !summary && !stopped) lastError = brief(text);
     if (summary) {
-      settle();
+      finished = true;
       if (Number(summary[1]) !== 0) {
         setFailed(true);
         update(percent, lastError || 'Autoload failed.', 'error');
@@ -275,54 +185,51 @@
       return;
     }
     if (stopped) {
-      settle();
+      finished = true;
       if (error) {
         setFailed(true);
         update(percent, lastError || 'Stopped.', 'error');
-      } else if (RE_ALREADY.test(text))
+      } else if (/ELF loader is already accepting connections/.test(text))
         update(100, 'ELF loader already running. Nothing to do.', 'done');
       else update(percent, 'Stopped.', 'stopped');
       return;
     }
     if (finished) return;
-    if (RE_SENT.test(text)) {
+    if (/Autoload: sent \d+ bytes/.test(text)) {
       sent = true;
       update(98, 'Finishing autoload...');
-    } else if (RE_AUTOLOAD.test(text)) update(95, 'Loading autoload payload...');
-    else if (RE_ELF_READY.test(text)) update(90, 'ELF loader ready...');
-    else if (RE_PRIVS.test(text)) update(80, 'Privileges ready...');
-    else if (RE_RW.test(text)) update(65, 'Kernel read/write ready...');
-    else if (RE_KERNEL.test(text)) update(40, 'Starting kernel exploit...');
-    else if (RE_ELFCHECK.test(text)) update(35, 'Checking ELF loader...');
-    else if (RE_WORKER.test(text)) update(30, 'WebKit ready...');
-    else if (RE_ARW.test(text)) update(20, 'Preparing WebKit...');
-    else if (RE_WEBKIT.test(text)) update(10, 'Starting WebKit exploit...');
+    } else if (/\[3\/3\].*autoload\.js/.test(text)) update(95, 'Loading autoload payload...');
+    else if (/payloads loaded|elfldr.*listening/i.test(text)) update(90, 'ELF loader ready...');
+    else if (/privileges ready/i.test(text)) update(80, 'Privileges ready...');
+    else if (/read and write ready/i.test(text)) update(65, 'Kernel read/write ready...');
+    else if (/Starting kernel exploit|\[2\/3\]/i.test(text)) update(40, 'Starting kernel exploit...');
+    else if (/\[1\/3\].*elfldr-check\.js/.test(text)) update(35, 'Checking ELF loader...');
+    else if (/Worker chain: ready/i.test(text)) update(30, 'WebKit ready...');
+    else if (/ARW ready/i.test(text)) update(20, 'Preparing WebKit...');
+    else if (/Starting WebKit exploit/i.test(text)) update(10, 'Starting WebKit exploit...');
     else {
-      var stage = RE_STAGE.exec(text);
+      var stage = /\bSTAGE\s*([0-5])\b/i.exec(text);
       if (stage) update(40 + Number(stage[1]) * 10, 'Running kernel exploit...');
     }
   }
 
-  /* One record per appended line is all this needs: writeLog appends a div and
-     fills it in the same task, so by the time the callback runs the line
-     already has its final class and text. Dropping subtree/attributes/
-     characterData means WebKit delivers one record instead of three per line —
-     and this callback runs in the same renderer as the exploit. */
+  // Observe the native log instead of replacing writeLog or the module APIs.
+  // Process only changed lines, including in-place stage updates.
   var observer = new MutationObserver(function (records) {
     var changed = [];
-    for (var r = 0; r < records.length; r++) {
-      var added = records[r].addedNodes;
-      for (var i = 0; i < added.length; i++) {
-        var node = added[i];
-        if (node.nodeType === 1 && changed.indexOf(node) < 0) changed.push(node);
-      }
+    function remember(node) {
+      if (node.nodeType !== 1) node = node.parentNode;
+      while (node && node.parentNode !== output) node = node.parentNode;
+      if (node && changed.indexOf(node) < 0) changed.push(node);
     }
-    for (var c = 0; c < changed.length; c++) readLine(changed[c]);
-    /* Trim in chunks, not one node per line: a removal is another mutation
-       record, and one per line is needless DOM churn. */
-    if (output.children.length > 100) {
-      while (output.children.length > 60) output.removeChild(output.firstElementChild);
-    }
+    records.forEach(function (record) {
+      if (record.target === output) {
+        for (var i = 0; i < record.addedNodes.length; i++) remember(record.addedNodes[i]);
+      } else remember(record.target);
+    });
+    changed.forEach(readLine);
+    while (output.children.length > 80) output.removeChild(output.firstElementChild);
+    wrapper.scrollTop = wrapper.scrollHeight;
   });
-  observer.observe(output, { childList: true });
+  observer.observe(output, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class'] });
 }());
