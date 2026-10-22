@@ -12,8 +12,10 @@ body {
 
 body {
   font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* Flat colour, not a full-viewport gradient: on this engine a gradient
+     background is re-rastered whenever its layer repaints, and the visible
+     range here was two shades of near-black anyway. */
   background: #070b14;
-  background: -webkit-linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
   color: #e2e8f0;
   min-height: 100%;
   overflow: hidden;
@@ -41,7 +43,6 @@ body {
   bottom: 0;
   z-index: 30;
   background: #070b14;
-  background: -webkit-linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
   opacity: 1;
   -webkit-transition: opacity 0.5s ease-out, visibility 0s linear 0.5s;
   transition: opacity 0.5s ease-out, visibility 0s linear 0.5s;
@@ -75,11 +76,12 @@ body {
 }
 
 /* A fade and a few pixels of travel, not a scale pop: the logo is a photo,
-   and scaling raster art reads as a cheap pop. */
+   and scaling raster art reads as a cheap pop. No filter here: drop-shadow
+   puts the image through a software filter pass in old WebKit, at the exact
+   moment the exploit is starting. */
 #splash .logo {
   width: 10rem;
   height: 10rem;
-  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.55));
   -webkit-animation: rise 0.55s ease-out both;
   animation: rise 0.55s ease-out both;
 }
@@ -142,7 +144,6 @@ body {
   -webkit-justify-content: center;
   justify-content: center;
   background: #070b14;
-  background: -webkit-linear-gradient(135deg, #070b14 0%, #0d1525 50%, #070b14 100%);
 }
 
 #progressContainer {
@@ -153,7 +154,9 @@ body {
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid rgba(56, 189, 248, 0.15);
   border-radius: 999px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
+  /* One shadow, short blur: a blurred box-shadow is rastered by the CPU here,
+     and every extra shadow layer is paid for again on each repaint. */
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.45);
   overflow: hidden;
 }
 
@@ -188,7 +191,9 @@ body {
 }
 
 /* One pass of light per milestone, driven by app.js. It used to loop every
-   two seconds for the whole run, which is what read as heavy. */
+   two seconds for the whole run, which is what read as heavy; the travel is a
+   compositor transform now, not `left`, so it no longer lays out and repaints
+   the pill on every frame. */
 #progressBar::after {
   content: '';
   position: absolute;
@@ -199,6 +204,8 @@ body {
   opacity: 0;
   background: -webkit-linear-gradient(90deg, transparent, rgba(255,255,255,0.20), transparent);
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.20), transparent);
+  -webkit-transform: translateX(-120%);
+  transform: translateX(-120%);
 }
 
 #progressBar.sweep::after {
@@ -208,37 +215,20 @@ body {
 }
 
 @-webkit-keyframes sweep {
-  0% { left: -50%; }
-  100% { left: 105%; }
+  0% { -webkit-transform: translateX(-120%); transform: translateX(-120%); }
+  100% { -webkit-transform: translateX(245%); transform: translateX(245%); }
 }
 
 @keyframes sweep {
-  0% { left: -50%; }
-  100% { left: 105%; }
+  0% { -webkit-transform: translateX(-120%); transform: translateX(-120%); }
+  100% { -webkit-transform: translateX(245%); transform: translateX(245%); }
 }
 
-/* A single soft bloom when the run reaches 100%, then the pill sits still. */
+/* Reaching 100% used to animate a box-shadow bloom, which repaints the whole
+   pill every frame for a second. The final state is painted once instead. */
 #progressContainer[data-state="done"] {
-  -webkit-animation: bloom 0.9s ease-out 1;
-  animation: bloom 0.9s ease-out 1;
-}
-
-@-webkit-keyframes bloom {
-  0%, 100% {
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
-  }
-  45% {
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04), 0 0 28px rgba(56, 189, 248, 0.28);
-  }
-}
-
-@keyframes bloom {
-  0%, 100% {
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
-  }
-  45% {
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04), 0 0 28px rgba(56, 189, 248, 0.28);
-  }
+  border-color: rgba(56, 189, 248, 0.4);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.45), 0 0 18px rgba(56, 189, 248, 0.14);
 }
 
 /* Failure tint: a chain error line or a failed autoload handoff. Without a
@@ -246,7 +236,7 @@ body {
    mid-stage just looks stalled. */
 #progressContainer.bad {
   border-color: rgba(248, 113, 113, 0.45);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04), 0 0 24px rgba(248, 113, 113, 0.12);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.45), 0 0 16px rgba(248, 113, 113, 0.12);
 }
 
 #progressContainer.bad #progressBar {
@@ -292,8 +282,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   #splash .logo,
   #splash h1,
-  #progressBar.sweep::after,
-  #progressContainer[data-state="done"] {
+  #progressBar.sweep::after {
     -webkit-animation: none;
     animation: none;
   }
